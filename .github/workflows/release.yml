@@ -1,0 +1,228 @@
+name: Build and publish clean S-UI
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - README.md
+      - .upstream-versions
+
+concurrency:
+  group: clean-s-ui-release
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "25"
+  CRONET_GO_VERSION: "2faf34666c2cc8234f10f2ab6d4c4d6104d34ae2"
+  CRONET_GO_REPO: https://github.com/sagernet/cronet-go.git
+  BOOTLIN_BASE_URL: https://toolchains.bootlin.com/downloads/releases/toolchains
+
+jobs:
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6.0.2
+
+      - name: Verify clean frontend source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RniE '3yuedaohang|zhanzhang3yue|banwagong' frontend/src; then
+            echo "Promotional content was found in frontend/src" >&2
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload frontend bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 7
+
+  build-linux:
+    name: build-${{ matrix.platform }}
+    needs: build-frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: amd64, arch: amd64, bootlin: x86-64, naive: true }
+          - { platform: arm64, arch: arm64, bootlin: aarch64, naive: true }
+          - { platform: armv7, arch: arm, goarm: "7", bootlin: armv7-eabihf, naive: true }
+          - { platform: armv6, arch: arm, goarm: "6", bootlin: armv6-eabihf, naive: true }
+          - { platform: armv5, arch: arm, goarm: "5", bootlin: armv5-eabi, naive: false }
+          - { platform: "386", arch: "386", bootlin: x86-i686, naive: true }
+          - { platform: s390x, arch: s390x, bootlin: s390x-z13, naive: false }
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6.0.2
+
+      - name: Download frontend bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: web/html
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: Clone cronet-go toolchain
+        if: matrix.naive
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/cronet-go"
+          git -C "$RUNNER_TEMP/cronet-go" remote add origin "${CRONET_GO_REPO}"
+          git -C "$RUNNER_TEMP/cronet-go" fetch --depth=1 origin "${CRONET_GO_VERSION}"
+          git -C "$RUNNER_TEMP/cronet-go" checkout FETCH_HEAD
+          git -C "$RUNNER_TEMP/cronet-go" submodule update --init --recursive --depth=1
+
+      - name: Regenerate Debian keyring
+        if: matrix.naive
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/cronet-go/naiveproxy/src/build/linux/sysroot_scripts/keyring.gpg"
+          cd "$RUNNER_TEMP/cronet-go"
+          GPG_TTY=/dev/null ./naiveproxy/src/build/linux/sysroot_scripts/generate_keyring.sh
+
+      - name: Cache Chromium toolchain
+        if: matrix.naive
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/cronet-go/naiveproxy/src/third_party/llvm-build/
+            ${{ runner.temp }}/cronet-go/naiveproxy/src/gn/out/
+            ${{ runner.temp }}/cronet-go/naiveproxy/src/chrome/build/pgo_profiles/
+            ${{ runner.temp }}/cronet-go/naiveproxy/src/out/sysroot-build/
+          key: chromium-toolchain-${{ matrix.platform }}-musl-${{ env.CRONET_GO_VERSION }}
+
+      - name: Prepare cronet musl toolchain
+        if: matrix.naive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/cronet-go"
+          go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl download-toolchain
+          go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl env | while IFS= read -r line; do
+            line="${line#export }"
+            [[ -z "$line" ]] && continue
+            echo "$line" >> "$GITHUB_ENV"
+          done
+
+      - name: Set Go build environment
+        shell: bash
+        run: |
+          echo "CGO_ENABLED=1" >> "$GITHUB_ENV"
+          echo "GOOS=linux" >> "$GITHUB_ENV"
+          echo "GOARCH=${{ matrix.arch }}" >> "$GITHUB_ENV"
+          if [[ -n "${{ matrix.goarm }}" ]]; then
+            echo "GOARM=${{ matrix.goarm }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Prepare Bootlin musl toolchain
+        if: ${{ matrix.naive != true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bootlin_arch="${{ matrix.bootlin }}"
+          tarball_base="${BOOTLIN_BASE_URL}/${bootlin_arch}/tarballs/"
+          tarball_name=$(curl -fsSL "$tarball_base" | grep -oE "${bootlin_arch}--musl--stable-[^\"]+\\.tar\\.xz" | sort -r | head -n1)
+          [[ -n "$tarball_name" ]]
+          cd "$RUNNER_TEMP"
+          curl -fL --retry 3 -o "$tarball_name" "${tarball_base}${tarball_name}"
+          tar -xf "$tarball_name"
+          toolchain_dir=$(find "$RUNNER_TEMP" -maxdepth 1 -type d -name "${bootlin_arch}--musl--stable-*" | head -n1)
+          bin_dir="$toolchain_dir/bin"
+          compiler=$(find "$bin_dir" -maxdepth 1 \( -name '*-gcc.br_real' -o -name '*-gcc' \) -type f -perm -111 | grep -v g++ | head -n1)
+          [[ -n "$compiler" ]]
+          echo "$bin_dir" >> "$GITHUB_PATH"
+          echo "CC=$compiler" >> "$GITHUB_ENV"
+          echo "CGO_LDFLAGS=-static" >> "$GITHUB_ENV"
+
+      - name: Build static S-UI binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_tags="with_quic,with_grpc,with_utls,with_acme,with_gvisor,badlinkname,tfogo_checklinkname0,with_tailscale"
+          if [[ "${{ matrix.naive }}" == "true" ]]; then
+            build_tags="${build_tags},with_naive_outbound,with_musl"
+          fi
+          go build -ldflags="-w -s -checklinkname=0 -linkmode external -extldflags '-static'" -tags "$build_tags" -o sui main.go
+          file sui
+          if ldd sui 2>&1 | grep -qvE 'not a dynamic executable|statically linked'; then
+            echo "The generated binary is not static" >&2
+            exit 1
+          fi
+          mkdir package
+          cp sui package/
+          cp s-ui.service package/
+          cp s-ui.sh package/
+
+      - name: Package release archive
+        shell: bash
+        run: |
+          mv package s-ui
+          tar -czf "s-ui-linux-${{ matrix.platform }}.tar.gz" s-ui
+          tar -tzf "s-ui-linux-${{ matrix.platform }}.tar.gz"
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: s-ui-linux-${{ matrix.platform }}
+          path: s-ui-linux-${{ matrix.platform }}.tar.gz
+          retention-days: 7
+
+  publish:
+    needs: build-linux
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: clean-${{ github.run_number }}
+    steps:
+      - name: Download all release archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: s-ui-linux-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish stable GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" ./*.tar.gz --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" --latest --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" ./*.tar.gz \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "S-UI Clean ${RELEASE_TAG}" \
+              --notes "Clean source build from commit ${GITHUB_SHA}. Promotional frontend links removed; Teminuosi S-UI functionality and SUI_AUTO=1 installation preserved." \
+              --latest
+          fi
