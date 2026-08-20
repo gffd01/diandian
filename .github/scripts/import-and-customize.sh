@@ -46,6 +46,11 @@ def replace_once(relative_path: str, old: str, new: str) -> None:
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
+# The upstream root ignores frontend/ because it is normally a git submodule.
+# This repository vendors that directory, so it must be tracked as ordinary source.
+replace_once(".gitignore", "frontend/\n", "")
+
+
 replace_once(
     "frontend/src/layouts/default/Drawer.vue",
     '''      <v-list-item prepend-icon="mdi-web" :title="$t('menu.site')"
