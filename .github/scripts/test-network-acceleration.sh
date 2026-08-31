@@ -11,6 +11,13 @@ fake_sysctl="$test_dir/sysctl"
 fake_state="$test_dir/sysctl.state"
 test_root="$test_dir/root"
 
+# Keep the common installer, management menu and acceleration status visible in
+# Chinese even after future upstream imports.
+grep -Fq 'S-UI 管理菜单' "$repo_root/s-ui.sh"
+grep -Fq '网络加速管理（BBR + fq）' "$repo_root/s-ui.sh"
+grep -Fq 'TCP 拥塞控制算法' "$module"
+grep -Fq '安装完成，服务已启动' "$repo_root/install.sh"
+
 cat > "$fake_sysctl" <<'SH'
 #!/usr/bin/env bash
 set -Eeuo pipefail

@@ -109,12 +109,16 @@ if 'SUI_AUTO="${SUI_AUTO:-1}"' not in install_text:
     raise SystemExit("Upstream SUI_AUTO=1 automatic installation logic was not found")
 if 'SUI_ACCEL="${SUI_ACCEL:-auto}"' not in install_text:
     raise SystemExit("Default-on S-UI acceleration integration was not found")
+if "安装完成，服务已启动" not in install_text:
+    raise SystemExit("Chinese installer messages were not found")
 if "Teminuosi/s-ui/releases" in install_text or "raw.githubusercontent.com/Teminuosi/s-ui" in install_text:
     raise SystemExit("An upstream runtime URL remains in install.sh")
 
 menu_text = (root / "s-ui.sh").read_text(encoding="utf-8")
 if "network-acceleration.sh" not in menu_text:
     raise SystemExit("Acceleration management menu integration was not found")
+if "S-UI 管理菜单" not in menu_text or "网络加速管理（BBR + fq）" not in menu_text:
+    raise SystemExit("Chinese S-UI management menu was not found")
 if "raw.githubusercontent.com/Teminuosi/s-ui" in menu_text or "github.com/Teminuosi/s-ui/raw" in menu_text:
     raise SystemExit("An upstream runtime URL remains in s-ui.sh")
 

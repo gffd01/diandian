@@ -20,13 +20,13 @@ preference_file="${state_dir}/network-acceleration.preference"
 sysctl_dir="${root_prefix}/etc/sysctl.d"
 sysctl_file="${sysctl_dir}/99-s-ui-network-acceleration.conf"
 
-info() { echo -e "${green}[acceleration]${plain} $*"; }
-warn() { echo -e "${yellow}[acceleration]${plain} $*"; }
-error() { echo -e "${red}[acceleration]${plain} $*" >&2; }
+info() { echo -e "${green}[网络加速]${plain} $*"; }
+warn() { echo -e "${yellow}[网络加速]${plain} $*"; }
+error() { echo -e "${red}[网络加速]${plain} $*" >&2; }
 
 require_root() {
     if [[ "${SUI_ACCEL_TEST_MODE:-0}" != "1" && $EUID -ne 0 ]]; then
-        error "Please run this command as root."
+        error "请使用 root 用户运行此命令。"
         return 1
     fi
 }
@@ -60,7 +60,7 @@ save_previous_state() {
     previous_cc=$(sysctl_get net.ipv4.tcp_congestion_control) || return 1
 
     if ! valid_sysctl_value "$previous_qdisc" || ! valid_sysctl_value "$previous_cc"; then
-        error "The current network settings could not be saved safely."
+        error "无法安全保存当前网络设置。"
         return 1
     fi
 
@@ -121,13 +121,13 @@ enable_acceleration() {
 
     load_kernel_modules
     if ! has_congestion_control bbr; then
-        error "This kernel does not expose TCP BBR; S-UI will continue without acceleration."
+        error "当前内核不支持 TCP BBR，S-UI 将跳过加速并继续运行。"
         return 1
     fi
 
     if [[ ! -f "$state_file" ]]; then
         save_previous_state || {
-            error "Could not save the current network settings; nothing was changed."
+            error "无法保存当前网络设置，本次未做任何修改。"
             return 1
         }
     fi
@@ -135,7 +135,7 @@ enable_acceleration() {
     mkdir -p "$sysctl_dir" || return 1
     local temporary_file="${sysctl_file}.tmp.$$"
     {
-        echo '# Managed by S-UI. Use `s-ui accel rollback` instead of editing this file.'
+        echo '# 由 S-UI 管理。需要恢复时请运行 `s-ui accel rollback`，不要直接修改此文件。'
         echo 'net.core.default_qdisc = fq'
         echo 'net.ipv4.tcp_congestion_control = bbr'
     } > "$temporary_file" || return 1
@@ -148,12 +148,12 @@ enable_acceleration() {
         rm -f "$sysctl_file"
         restore_saved_runtime >/dev/null 2>&1 || true
         rm -f "$state_file"
-        error "The kernel rejected BBR + fq; previous settings were restored."
+        error "内核无法应用 BBR + fq，已恢复原来的网络设置。"
         return 1
     fi
 
     write_preference enabled || return 1
-    info "TCP acceleration is enabled: BBR + fq."
+    info "TCP 加速已开启：BBR + fq。"
 }
 
 rollback_acceleration() {
@@ -166,13 +166,13 @@ rollback_acceleration() {
 
     if [[ $had_state -eq 1 ]]; then
         if ! restore_saved_runtime; then
-            error "The managed sysctl file was removed, but restoring the saved runtime values failed."
+            error "已删除加速配置，但恢复原网络参数失败，请手动检查。"
             return 1
         fi
         rm -f "$state_file"
-        info "Previous network settings were restored."
+        info "已恢复加速前的网络设置。"
     else
-        warn "No S-UI acceleration state was found; no existing network values were changed."
+        warn "没有找到 S-UI 加速记录，未修改现有网络参数。"
     fi
 
     if [[ "$purge_preference" == "--purge" ]]; then
@@ -180,30 +180,35 @@ rollback_acceleration() {
         rmdir "$state_dir" >/dev/null 2>&1 || true
     else
         write_preference disabled || return 1
-        info "Automatic acceleration is disabled for future S-UI upgrades."
+        info "已关闭自动加速，后续 S-UI 升级会保持关闭。"
     fi
 }
 
 show_status() {
-    local qdisc cc preference
+    local qdisc cc preference preference_label
     qdisc=$(sysctl_get net.core.default_qdisc 2>/dev/null || echo unknown)
     cc=$(sysctl_get net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)
     preference=$(read_preference)
     [[ -n "$preference" ]] || preference="default-enabled"
+    case "$preference" in
+    enabled) preference_label="已开启" ;;
+    disabled) preference_label="已手动关闭" ;;
+    *) preference_label="默认开启" ;;
+    esac
 
-    echo "TCP congestion control: $cc"
-    echo "Default queue discipline: $qdisc"
-    echo "S-UI preference: $preference"
+    echo "TCP 拥塞控制算法：$cc"
+    echo "默认队列算法：$qdisc"
+    echo "S-UI 加速设置：$preference_label"
     if runtime_is_accelerated; then
-        info "Acceleration is active."
+        info "加速当前正在生效。"
     else
-        warn "Acceleration is not active."
+        warn "加速当前未生效。"
     fi
 }
 
 auto_enable() {
     if [[ "$(read_preference)" == "disabled" ]]; then
-        warn "Keeping acceleration disabled because it was previously rolled back."
+        warn "检测到此前已手动回滚，本次升级继续保持关闭。"
         return 0
     fi
     enable_acceleration
@@ -216,7 +221,7 @@ disable | rollback) rollback_acceleration ;;
 purge) rollback_acceleration --purge ;;
 status) show_status ;;
 *)
-    echo "Usage: $0 {status|enable|auto|rollback|purge}" >&2
+    echo "用法：$0 {status|enable|auto|rollback|purge}" >&2
     exit 2
     ;;
 esac

@@ -31,7 +31,7 @@ auto_read() {
     local __av="$1" __ad="$2" __ap="$3"
     if is_auto; then
         printf -v "$__av" '%s' "$__ad"
-        echo -e "${yellow}[auto]${plain} ${__ap}${__ad}"
+        echo -e "${yellow}[自动]${plain} ${__ap}${__ad}"
     else
         read -rp "$__ap" "$__av"
     fi
@@ -93,34 +93,34 @@ resolve_port_clash() {
     if [[ -n "$cur_port" ]] && is_port_in_use "$cur_port"; then
         local np=$(pick_port "$cur_port")
         params="$params -port $np"
-        echo -e "${red}[auto] Panel port ${cur_port} is already in use by another process; moving the panel to ${np}.${plain}"
+        echo -e "${red}[自动] 面板端口 ${cur_port} 已被其他程序占用，已改为 ${np}。${plain}"
     fi
     if [[ -n "$cur_sub" ]] && is_port_in_use "$cur_sub"; then
         local ns=$(pick_port "$cur_sub")
         params="$params -subPort $ns"
-        echo -e "${red}[auto] Sub port ${cur_sub} is already in use (another panel? e.g. 3x-ui on 2096); moving subscriptions to ${ns}.${plain}"
+        echo -e "${red}[自动] 订阅端口 ${cur_sub} 已被其他程序占用，已改为 ${ns}。${plain}"
     fi
     if [[ -n "$params" ]]; then
         /usr/local/s-ui/sui setting ${params}
-        echo -e "${yellow}[auto] Ports changed to avoid a clash. Update any subscription links / bookmarks accordingly.${plain}"
+        echo -e "${yellow}[自动] 为避免端口冲突，地址已发生变化，请更新订阅链接或书签。${plain}"
     fi
 }
 
 # check root
-[[ $EUID -ne 0 ]] && echo -e "${red}Fatal error: ${plain} Please run this script with root privilege \n " && exit 1
+[[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain}请使用 root 用户运行此脚本。\n" && exit 1
 
 # 一键彻底清除入口: bash <(curl -Ls .../install.sh) purge
 # 为什么不复用 s-ui.sh 的卸载:安装被中断时 /usr/bin/s-ui 可能压根没铺下去,
 # 那条路走不通。这里只依赖 root,不依赖任何已安装的文件,也不做系统检测 ——
 # 检测失败就 exit 的话,最需要清理的机器反而清不了。
 if [[ "$1" == "purge" || "$1" == "uninstall" || "$1" == "--purge" ]]; then
-    echo -e "${yellow}Removing every trace of s-ui from this system...${plain}"
+    echo -e "${yellow}正在彻底删除系统中的 S-UI……${plain}"
 
     # Restore the exact network values saved by the optional acceleration
     # module before its files and state are removed.
     if [[ -x /usr/local/s-ui/network-acceleration.sh ]]; then
         /usr/local/s-ui/network-acceleration.sh purge || \
-            echo -e "${yellow}Warning: network acceleration rollback needs manual review.${plain}"
+            echo -e "${yellow}警告：网络加速回滚未完全成功，需要手动检查。${plain}"
     fi
 
     # 每一步独立执行、失败不影响后面:装坏的机器上服务和文件往往只存在一部分。
@@ -137,8 +137,8 @@ if [[ "$1" == "purge" || "$1" == "uninstall" || "$1" == "--purge" ]]; then
     rm -rf /usr/local/s-ui/
     rm -f /usr/bin/s-ui
 
-    echo -e "${green}Done. s-ui has been completely removed.${plain}"
-    echo -e "Reinstall with: ${green}bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)${plain}"
+    echo -e "${green}完成，S-UI 已彻底删除。${plain}"
+    echo -e "重新安装命令：${green}bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)${plain}"
     exit 0
 fi
 
@@ -151,10 +151,10 @@ elif [[ -f /usr/lib/os-release ]]; then
     source /usr/lib/os-release
     release=$ID
 else
-    echo "Failed to check the system OS, please contact the author!" >&2
+    echo "无法识别当前操作系统，请检查系统环境。" >&2
     exit 1
 fi
-echo "The OS release is: $release"
+echo "当前系统：$release"
 
 arch() {
     case "$(uname -m)" in
@@ -165,11 +165,11 @@ arch() {
     armv6* | armv6) echo 'armv6' ;;
     armv5* | armv5) echo 'armv5' ;;
     s390x) echo 's390x' ;;
-    *) echo -e "${green}Unsupported CPU architecture! ${plain}" && rm -f install.sh && exit 1 ;;
+    *) echo -e "${red}不支持当前 CPU 架构！${plain}" && rm -f install.sh && exit 1 ;;
     esac
 }
 
-echo "arch: $(arch)"
+echo "CPU 架构：$(arch)"
 
 install_base() {
     case "${release}" in
@@ -192,7 +192,7 @@ install_base() {
 }
 
 config_after_install() {
-    echo -e "${yellow}Migration... ${plain}"
+    echo -e "${yellow}正在迁移数据……${plain}"
     /usr/local/s-ui/sui migrate
 
     # Full-auto mode: no prompts. Fresh install -> random credentials + random
@@ -206,59 +206,59 @@ config_after_install() {
             # 3x-ui install already on 2096). Keep the defaults when they're free.
             local config_port=$(pick_port 2095)
             local config_subPort=$(pick_port 2096)
-            echo -e "${yellow}[auto] Fresh install: generating random credentials, panel path and free ports...${plain}"
-            [[ "$config_port" != "2095" ]] && echo -e "${yellow}[auto] Port 2095 busy, using ${config_port} for the panel.${plain}"
-            [[ "$config_subPort" != "2096" ]] && echo -e "${yellow}[auto] Port 2096 busy, using ${config_subPort} for subscriptions.${plain}"
+            echo -e "${yellow}[自动] 全新安装：正在生成随机账号、密码、面板路径和可用端口……${plain}"
+            [[ "$config_port" != "2095" ]] && echo -e "${yellow}[自动] 端口 2095 已占用，面板改用 ${config_port}。${plain}"
+            [[ "$config_subPort" != "2096" ]] && echo -e "${yellow}[自动] 端口 2096 已占用，订阅服务改用 ${config_subPort}。${plain}"
             /usr/local/s-ui/sui setting -port "${config_port}" -path "/${config_path}/" -subPort "${config_subPort}"
             /usr/local/s-ui/sui admin -username "${config_account}" -password "${config_password}"
             # Generate an APIv2 token so this server can be managed from another
             # panel out of the box (central management).
             local config_token=$(/usr/local/s-ui/sui token -desc install 2>/dev/null)
             echo -e "###############################################"
-            echo -e "${green}username:${config_account}${plain}"
-            echo -e "${green}password:${config_password}${plain}"
-            echo -e "${green}panel port:${config_port}${plain}"
-            echo -e "${green}panel path:/${config_path}/${plain}"
-            echo -e "${green}sub port:${config_subPort}${plain}"
+            echo -e "${green}管理员用户名：${config_account}${plain}"
+            echo -e "${green}管理员密码：${config_password}${plain}"
+            echo -e "${green}面板端口：${config_port}${plain}"
+            echo -e "${green}面板路径：/${config_path}/${plain}"
+            echo -e "${green}订阅端口：${config_subPort}${plain}"
             if [[ -n "$config_token" ]]; then
-                echo -e "${green}API token (copy the line below):${plain}"
+                echo -e "${green}API Token（请复制下一行）：${plain}"
                 echo -e "${config_token}"
             fi
             echo -e "###############################################"
-            echo -e "${red}If you forget your login info, type ${green}s-ui${red} on the server for the menu.${plain}"
+            echo -e "${red}如果忘记登录信息，请在服务器运行 ${green}s-ui${red} 打开管理菜单。${plain}"
         else
-            echo -e "${yellow}[auto] Upgrade detected: keeping existing settings.${plain}"
+            echo -e "${yellow}[自动] 检测到升级，将保留现有设置。${plain}"
             # Guard against a port clash with another panel on the same box.
             resolve_port_clash
             local up_token=$(/usr/local/s-ui/sui token -desc upgrade 2>/dev/null)
             echo -e "###############################################"
             /usr/local/s-ui/sui admin -show 2>/dev/null
             if [[ -n "$up_token" ]]; then
-                echo -e "${green}API token (copy the line below):${plain}"
+                echo -e "${green}API Token（请复制下一行）：${plain}"
                 echo -e "${up_token}"
             fi
-            echo -e "${red}If you forget your login info, type ${green}s-ui${red} on the server for the menu.${plain}"
+            echo -e "${red}如果忘记登录信息，请在服务器运行 ${green}s-ui${red} 打开管理菜单。${plain}"
             echo -e "###############################################"
         fi
         return
     fi
 
-    echo -e "${yellow}Install/update finished! For security it's recommended to modify panel settings ${plain}"
-    read -p "Do you want to continue with the modification [y/n]? ": config_confirm
+    echo -e "${yellow}安装或更新完成！为确保安全，建议检查并修改面板设置。${plain}"
+    read -p "是否现在修改 [y/n]：" config_confirm
     if [[ "${config_confirm}" == "y" || "${config_confirm}" == "Y" ]]; then
-        echo -e "Enter the ${yellow}panel port${plain} (leave blank for existing/default value):"
+        echo -e "请输入${yellow}面板端口${plain}（留空保持当前值或默认值）："
         read config_port
-        echo -e "Enter the ${yellow}panel path${plain} (leave blank for existing/default value):"
+        echo -e "请输入${yellow}面板路径${plain}（留空保持当前值或默认值）："
         read config_path
 
         # Sub configuration
-        echo -e "Enter the ${yellow}subscription port${plain} (leave blank for existing/default value):"
+        echo -e "请输入${yellow}订阅端口${plain}（留空保持当前值或默认值）："
         read config_subPort
-        echo -e "Enter the ${yellow}subscription path${plain} (leave blank for existing/default value):" 
+        echo -e "请输入${yellow}订阅路径${plain}（留空保持当前值或默认值）："
         read config_subPath
 
         # Set configs
-        echo -e "${yellow}Initializing, please wait...${plain}"
+        echo -e "${yellow}正在保存设置，请稍候……${plain}"
         params=""
         [ -z "$config_port" ] || params="$params -port $config_port"
         [ -z "$config_path" ] || params="$params -path $config_path"
@@ -266,21 +266,21 @@ config_after_install() {
         [ -z "$config_subPath" ] || params="$params -subPath $config_subPath"
         /usr/local/s-ui/sui setting ${params}
 
-        read -p "Do you want to change admin credentials [y/n]? ": admin_confirm
+        read -p "是否修改管理员账号和密码 [y/n]：" admin_confirm
         if [[ "${admin_confirm}" == "y" || "${admin_confirm}" == "Y" ]]; then
             # First admin credentials
-            read -p "Please set up your username:" config_account
-            read -p "Please set up your password:" config_password
+            read -p "请输入管理员用户名：" config_account
+            read -p "请输入管理员密码：" config_password
 
             # Set credentials
-            echo -e "${yellow}Initializing, please wait...${plain}"
+            echo -e "${yellow}正在保存设置，请稍候……${plain}"
             /usr/local/s-ui/sui admin -username ${config_account} -password ${config_password}
         else
-            echo -e "${yellow}Your current admin credentials: ${plain}"
+            echo -e "${yellow}当前管理员信息：${plain}"
             /usr/local/s-ui/sui admin -show
         fi
     else
-        echo -e "${red}cancel...${plain}"
+        echo -e "${red}已取消修改。${plain}"
         if [[ ! -f "/usr/local/s-ui/db/s-ui.db" ]]; then
             local usernameTemp=$(head -c 6 /dev/urandom | base64)
             local passwordTemp=$(head -c 6 /dev/urandom | base64)
@@ -288,18 +288,18 @@ config_after_install() {
             # Mint an APIv2 token even on a plain (non-auto) fresh install, so this
             # panel can be managed centrally out of the box. (qs31)
             local config_token=$(/usr/local/s-ui/sui token -desc install 2>/dev/null)
-            echo -e "this is a fresh installation,will generate random login info for security concerns:"
+            echo -e "这是全新安装，将自动生成随机登录信息："
             echo -e "###############################################"
-            echo -e "${green}username:${usernameTemp}${plain}"
-            echo -e "${green}password:${passwordTemp}${plain}"
+            echo -e "${green}管理员用户名：${usernameTemp}${plain}"
+            echo -e "${green}管理员密码：${passwordTemp}${plain}"
             if [[ -n "$config_token" ]]; then
-                echo -e "${green}API token (copy the line below):${plain}"
+                echo -e "${green}API Token（请复制下一行）：${plain}"
                 echo -e "${config_token}"
             fi
             echo -e "###############################################"
-            echo -e "${red}if you forgot your login info,you can type ${green}s-ui${red} for configuration menu${plain}"
+            echo -e "${red}如果忘记登录信息，请运行 ${green}s-ui${red} 打开管理菜单。${plain}"
         else
-            echo -e "${red} this is your upgrade,will keep old settings,if you forgot your login info,you can type ${green}s-ui${red} for configuration menu${plain}"
+            echo -e "${red}这是升级操作，已保留原设置；如忘记登录信息，请运行 ${green}s-ui${red}。${plain}"
         fi
     fi
 }
@@ -317,14 +317,14 @@ open_firewall() {
         ufw allow 10000:60000/tcp > /dev/null 2>&1
         ufw allow 10000:60000/udp > /dev/null 2>&1
         ufw reload > /dev/null 2>&1
-        echo -e "${green}[auto] Firewall (ufw) opened: ${panel_port}, ${sub_port}, 10000-60000 tcp/udp.${plain}"
+        echo -e "${green}[自动] ufw 防火墙已放行：${panel_port}、${sub_port}、10000-60000 TCP/UDP。${plain}"
     elif command -v firewall-cmd > /dev/null 2>&1 && firewall-cmd --state > /dev/null 2>&1; then
         [[ -n "$panel_port" ]] && firewall-cmd --permanent --add-port="${panel_port}/tcp" > /dev/null 2>&1
         [[ -n "$sub_port" ]] && firewall-cmd --permanent --add-port="${sub_port}/tcp" > /dev/null 2>&1
         firewall-cmd --permanent --add-port=10000-60000/tcp > /dev/null 2>&1
         firewall-cmd --permanent --add-port=10000-60000/udp > /dev/null 2>&1
         firewall-cmd --reload > /dev/null 2>&1
-        echo -e "${green}[auto] Firewall (firewalld) opened: ${panel_port}, ${sub_port}, 10000-60000 tcp/udp.${plain}"
+        echo -e "${green}[自动] firewalld 已放行：${panel_port}、${sub_port}、10000-60000 TCP/UDP。${plain}"
     fi
 }
 
@@ -334,25 +334,25 @@ open_firewall() {
 configure_acceleration() {
     local module="/usr/local/s-ui/network-acceleration.sh"
     if [[ ! -x "$module" ]]; then
-        echo -e "${yellow}[acceleration] Module is not included in this release; continuing without changing network settings.${plain}"
+        echo -e "${yellow}[网络加速] 当前安装包不包含加速模块，将保持原网络设置并继续安装。${plain}"
         return 0
     fi
 
     case "${SUI_ACCEL}" in
     0 | n | N | no | NO | false | FALSE | off | OFF)
         "$module" rollback || \
-            echo -e "${yellow}[acceleration] Rollback was not fully applied; S-UI installation will continue.${plain}"
+            echo -e "${yellow}[网络加速] 回滚未完全成功，S-UI 将继续安装。${plain}"
         ;;
     1 | y | Y | yes | YES | true | TRUE | on | ON)
         "$module" enable || \
-            echo -e "${yellow}[acceleration] BBR + fq is unavailable; S-UI installation will continue normally.${plain}"
+            echo -e "${yellow}[网络加速] 当前系统无法启用 BBR + fq，S-UI 将继续正常安装。${plain}"
         ;;
     auto | "")
         "$module" auto || \
-            echo -e "${yellow}[acceleration] BBR + fq is unavailable; S-UI installation will continue normally.${plain}"
+            echo -e "${yellow}[网络加速] 当前系统无法启用 BBR + fq，S-UI 将继续正常安装。${plain}"
         ;;
     *)
-        echo -e "${yellow}[acceleration] Unknown SUI_ACCEL=${SUI_ACCEL}; using the default automatic mode.${plain}"
+        echo -e "${yellow}[网络加速] 无法识别 SUI_ACCEL=${SUI_ACCEL}，将使用默认自动模式。${plain}"
         "$module" auto || true
         ;;
     esac
@@ -360,14 +360,14 @@ configure_acceleration() {
 
 prepare_services() {
     if [[ -f "/etc/systemd/system/sing-box.service" ]]; then
-        echo -e "${yellow}Stopping sing-box service... ${plain}"
+        echo -e "${yellow}正在停止 sing-box 服务……${plain}"
         systemctl stop sing-box
         rm -f /usr/local/s-ui/bin/sing-box /usr/local/s-ui/bin/runSingbox.sh /usr/local/s-ui/bin/signal
     fi
     if [[ -e "/usr/local/s-ui/bin" ]]; then
         echo -e "###############################################################"
-        echo -e "${green}/usr/local/s-ui/bin${red} directory exists yet!"
-        echo -e "Please check the content and delete it manually after migration ${plain}"
+        echo -e "${green}/usr/local/s-ui/bin${red} 目录已经存在！"
+        echo -e "请检查其中的内容，并在迁移完成后手动清理。${plain}"
         echo -e "###############################################################"
     fi
     systemctl daemon-reload
@@ -391,10 +391,10 @@ download_release() {
     )
     for src in "${sources[@]}"; do
         if [[ "$src" == "$gh_url" ]]; then
-            echo -e "${yellow}Downloading (direct github.com)...${plain}"
+            echo -e "${yellow}正在从 GitHub 直接下载……${plain}"
         else
             label="${src#https://}"; label="${label%%/*}"
-            echo -e "${yellow}Direct download failed, retrying via mirror: ${label}${plain}"
+            echo -e "${yellow}直接下载失败，正在尝试镜像：${label}${plain}"
         fi
         if wget --no-check-certificate --timeout=30 --tries=2 -O "$out" "$src" \
             && tar -tzf "$out" > /dev/null 2>&1; then
@@ -416,20 +416,20 @@ install_s-ui() {
             last_version=$(curl -Ls "https://api.github.com/repos/gffd01/diandian/releases" | grep '"tag_name":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
         fi
         if [[ ! -n "$last_version" ]]; then
-            echo -e "${red}Failed to fetch s-ui version, it maybe due to Github API restrictions, please try it later${plain}"
+            echo -e "${red}获取 S-UI 版本失败，可能是 GitHub API 限制，请稍后重试。${plain}"
             exit 1
         fi
-        echo -e "Got s-ui latest version: ${last_version}, beginning the installation..."
+        echo -e "已获取 S-UI 最新版本：${last_version}，开始安装……"
         if ! download_release /tmp/s-ui-linux-$(arch).tar.gz "https://github.com/gffd01/diandian/releases/download/${last_version}/s-ui-linux-$(arch).tar.gz"; then
-            echo -e "${red}Downloading s-ui failed after trying direct + mirrors. Make sure your server can reach Github (or a proxy) and that /tmp has free disk space.${plain}"
+            echo -e "${red}直接下载和镜像下载均失败，请确认服务器能访问 GitHub，并检查 /tmp 剩余空间。${plain}"
             exit 1
         fi
     else
         last_version=$1
         url="https://github.com/gffd01/diandian/releases/download/${last_version}/s-ui-linux-$(arch).tar.gz"
-        echo -e "Beginning the install s-ui v$1"
+        echo -e "开始安装 S-UI v$1……"
         if ! download_release /tmp/s-ui-linux-$(arch).tar.gz "${url}"; then
-            echo -e "${red}download s-ui v$1 failed (tried direct + mirrors), please check the version exists${plain}"
+            echo -e "${red}S-UI v$1 下载失败，请确认该版本存在。${plain}"
             exit 1
         fi
     fi
@@ -455,14 +455,14 @@ install_s-ui() {
 
     systemctl enable s-ui --now
 
-    echo -e "${green}s-ui ${last_version}${plain} installation finished, it is up and running now..."
-    echo -e "You may access the Panel with following URL(s):${green}"
+    echo -e "${green}S-UI ${last_version}${plain} 安装完成，服务已启动。"
+    echo -e "可通过以下地址访问面板：${green}"
     /usr/local/s-ui/sui uri
     echo -e "${plain}"
     echo -e ""
     s-ui help
 }
 
-echo -e "${green}Executing...${plain}"
+echo -e "${green}正在执行……${plain}"
 install_base
 install_s-ui $1
