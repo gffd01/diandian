@@ -10,11 +10,15 @@ cur_dir=$(pwd)
 # Full-auto is the DEFAULT install mode: every command runs start-to-finish with
 # no prompts. On a fresh install it generates random admin credentials + a random
 # panel path + free ports + an API token and opens the firewall, then prints the
-# access info; on an upgrade it keeps existing settings untouched. To get the old
+# access info; on an upgrade it keeps existing settings untouched. TCP BBR + fq
+# acceleration is enabled by default, unless it was explicitly rolled back on a
+# previous install. Set SUI_ACCEL=0 to keep it disabled. To get the old
 # interactive flow back, set SUI_AUTO=0 (or n). Examples:
 #   bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)            # auto (default)
 #   SUI_AUTO=0 bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh) # interactive
+#   SUI_ACCEL=0 bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh) # no BBR + fq
 SUI_AUTO="${SUI_AUTO:-1}"
+SUI_ACCEL="${SUI_ACCEL:-auto}"
 
 is_auto() {
     [[ "$SUI_AUTO" != "0" && "$SUI_AUTO" != "n" && "$SUI_AUTO" != "N" ]]
@@ -111,6 +115,13 @@ resolve_port_clash() {
 # 检测失败就 exit 的话,最需要清理的机器反而清不了。
 if [[ "$1" == "purge" || "$1" == "uninstall" || "$1" == "--purge" ]]; then
     echo -e "${yellow}Removing every trace of s-ui from this system...${plain}"
+
+    # Restore the exact network values saved by the optional acceleration
+    # module before its files and state are removed.
+    if [[ -x /usr/local/s-ui/network-acceleration.sh ]]; then
+        /usr/local/s-ui/network-acceleration.sh purge || \
+            echo -e "${yellow}Warning: network acceleration rollback needs manual review.${plain}"
+    fi
 
     # 每一步独立执行、失败不影响后面:装坏的机器上服务和文件往往只存在一部分。
     systemctl stop s-ui >/dev/null 2>&1
@@ -317,6 +328,36 @@ open_firewall() {
     fi
 }
 
+# Acceleration is default-on for fresh installs. "auto" also preserves a user's
+# explicit rollback across future upgrades, while SUI_ACCEL=1 and SUI_ACCEL=0
+# force the requested state.
+configure_acceleration() {
+    local module="/usr/local/s-ui/network-acceleration.sh"
+    if [[ ! -x "$module" ]]; then
+        echo -e "${yellow}[acceleration] Module is not included in this release; continuing without changing network settings.${plain}"
+        return 0
+    fi
+
+    case "${SUI_ACCEL}" in
+    0 | n | N | no | NO | false | FALSE | off | OFF)
+        "$module" rollback || \
+            echo -e "${yellow}[acceleration] Rollback was not fully applied; S-UI installation will continue.${plain}"
+        ;;
+    1 | y | Y | yes | YES | true | TRUE | on | ON)
+        "$module" enable || \
+            echo -e "${yellow}[acceleration] BBR + fq is unavailable; S-UI installation will continue normally.${plain}"
+        ;;
+    auto | "")
+        "$module" auto || \
+            echo -e "${yellow}[acceleration] BBR + fq is unavailable; S-UI installation will continue normally.${plain}"
+        ;;
+    *)
+        echo -e "${yellow}[acceleration] Unknown SUI_ACCEL=${SUI_ACCEL}; using the default automatic mode.${plain}"
+        "$module" auto || true
+        ;;
+    esac
+}
+
 prepare_services() {
     if [[ -f "/etc/systemd/system/sing-box.service" ]]; then
         echo -e "${yellow}Stopping sing-box service... ${plain}"
@@ -401,6 +442,7 @@ install_s-ui() {
     rm s-ui-linux-$(arch).tar.gz -f
 
     chmod +x s-ui/sui s-ui/s-ui.sh
+    [[ -f s-ui/network-acceleration.sh ]] && chmod +x s-ui/network-acceleration.sh
     cp s-ui/s-ui.sh /usr/bin/s-ui
     cp -rf s-ui /usr/local/
     cp -f s-ui/*.service /etc/systemd/system/
@@ -409,6 +451,7 @@ install_s-ui() {
     config_after_install
     open_firewall
     prepare_services
+    configure_acceleration
 
     systemctl enable s-ui --now
 

@@ -1,0 +1,307 @@
+--- a/install.sh
++++ b/install.sh
+@@ -10,11 +10,15 @@
+ # Full-auto is the DEFAULT install mode: every command runs start-to-finish with
+ # no prompts. On a fresh install it generates random admin credentials + a random
+ # panel path + free ports + an API token and opens the firewall, then prints the
+-# access info; on an upgrade it keeps existing settings untouched. To get the old
++# access info; on an upgrade it keeps existing settings untouched. TCP BBR + fq
++# acceleration is enabled by default, unless it was explicitly rolled back on a
++# previous install. Set SUI_ACCEL=0 to keep it disabled. To get the old
+ # interactive flow back, set SUI_AUTO=0 (or n). Examples:
+-#   bash <(curl -Ls https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh)            # auto (default)
+-#   SUI_AUTO=0 bash <(curl -Ls https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh) # interactive
++#   bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)            # auto (default)
++#   SUI_AUTO=0 bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh) # interactive
++#   SUI_ACCEL=0 bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh) # no BBR + fq
+ SUI_AUTO="${SUI_AUTO:-1}"
++SUI_ACCEL="${SUI_ACCEL:-auto}"
+ 
+ is_auto() {
+     [[ "$SUI_AUTO" != "0" && "$SUI_AUTO" != "n" && "$SUI_AUTO" != "N" ]]
+@@ -112,6 +116,13 @@
+ if [[ "$1" == "purge" || "$1" == "uninstall" || "$1" == "--purge" ]]; then
+     echo -e "${yellow}Removing every trace of s-ui from this system...${plain}"
+ 
++    # Restore the exact network values saved by the optional acceleration
++    # module before its files and state are removed.
++    if [[ -x /usr/local/s-ui/network-acceleration.sh ]]; then
++        /usr/local/s-ui/network-acceleration.sh purge || \
++            echo -e "${yellow}Warning: network acceleration rollback needs manual review.${plain}"
++    fi
++
+     # 每一步独立执行、失败不影响后面:装坏的机器上服务和文件往往只存在一部分。
+     systemctl stop s-ui >/dev/null 2>&1
+     systemctl disable s-ui >/dev/null 2>&1
+@@ -127,7 +138,7 @@
+     rm -f /usr/bin/s-ui
+ 
+     echo -e "${green}Done. s-ui has been completely removed.${plain}"
+-    echo -e "Reinstall with: ${green}bash <(curl -Ls https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh)${plain}"
++    echo -e "Reinstall with: ${green}bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)${plain}"
+     exit 0
+ fi
+ 
+@@ -317,6 +328,36 @@
+     fi
+ }
+ 
++# Acceleration is default-on for fresh installs. "auto" also preserves a user's
++# explicit rollback across future upgrades, while SUI_ACCEL=1 and SUI_ACCEL=0
++# force the requested state.
++configure_acceleration() {
++    local module="/usr/local/s-ui/network-acceleration.sh"
++    if [[ ! -x "$module" ]]; then
++        echo -e "${yellow}[acceleration] Module is not included in this release; continuing without changing network settings.${plain}"
++        return 0
++    fi
++
++    case "${SUI_ACCEL}" in
++    0 | n | N | no | NO | false | FALSE | off | OFF)
++        "$module" rollback || \
++            echo -e "${yellow}[acceleration] Rollback was not fully applied; S-UI installation will continue.${plain}"
++        ;;
++    1 | y | Y | yes | YES | true | TRUE | on | ON)
++        "$module" enable || \
++            echo -e "${yellow}[acceleration] BBR + fq is unavailable; S-UI installation will continue normally.${plain}"
++        ;;
++    auto | "")
++        "$module" auto || \
++            echo -e "${yellow}[acceleration] BBR + fq is unavailable; S-UI installation will continue normally.${plain}"
++        ;;
++    *)
++        echo -e "${yellow}[acceleration] Unknown SUI_ACCEL=${SUI_ACCEL}; using the default automatic mode.${plain}"
++        "$module" auto || true
++        ;;
++    esac
++}
++
+ prepare_services() {
+     if [[ -f "/etc/systemd/system/sing-box.service" ]]; then
+         echo -e "${yellow}Stopping sing-box service... ${plain}"
+@@ -368,24 +409,24 @@
+     cd /tmp/
+ 
+     if [ $# == 0 ]; then
+-        last_version=$(curl -Ls "https://api.github.com/repos/Teminuosi/s-ui/releases/latest" | grep '"tag_name":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
++        last_version=$(curl -Ls "https://api.github.com/repos/gffd01/diandian/releases/latest" | grep '"tag_name":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+         # Fall back to the most recent release (covers prerelease-only repos:
+         # /releases/latest skips prereleases, /releases lists everything).
+         if [[ -z "$last_version" ]]; then
+-            last_version=$(curl -Ls "https://api.github.com/repos/Teminuosi/s-ui/releases" | grep '"tag_name":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
++            last_version=$(curl -Ls "https://api.github.com/repos/gffd01/diandian/releases" | grep '"tag_name":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+         fi
+         if [[ ! -n "$last_version" ]]; then
+             echo -e "${red}Failed to fetch s-ui version, it maybe due to Github API restrictions, please try it later${plain}"
+             exit 1
+         fi
+         echo -e "Got s-ui latest version: ${last_version}, beginning the installation..."
+-        if ! download_release /tmp/s-ui-linux-$(arch).tar.gz "https://github.com/Teminuosi/s-ui/releases/download/${last_version}/s-ui-linux-$(arch).tar.gz"; then
++        if ! download_release /tmp/s-ui-linux-$(arch).tar.gz "https://github.com/gffd01/diandian/releases/download/${last_version}/s-ui-linux-$(arch).tar.gz"; then
+             echo -e "${red}Downloading s-ui failed after trying direct + mirrors. Make sure your server can reach Github (or a proxy) and that /tmp has free disk space.${plain}"
+             exit 1
+         fi
+     else
+         last_version=$1
+-        url="https://github.com/Teminuosi/s-ui/releases/download/${last_version}/s-ui-linux-$(arch).tar.gz"
++        url="https://github.com/gffd01/diandian/releases/download/${last_version}/s-ui-linux-$(arch).tar.gz"
+         echo -e "Beginning the install s-ui v$1"
+         if ! download_release /tmp/s-ui-linux-$(arch).tar.gz "${url}"; then
+             echo -e "${red}download s-ui v$1 failed (tried direct + mirrors), please check the version exists${plain}"
+@@ -401,6 +442,7 @@
+     rm s-ui-linux-$(arch).tar.gz -f
+ 
+     chmod +x s-ui/sui s-ui/s-ui.sh
++    [[ -f s-ui/network-acceleration.sh ]] && chmod +x s-ui/network-acceleration.sh
+     cp s-ui/s-ui.sh /usr/bin/s-ui
+     cp -rf s-ui /usr/local/
+     cp -f s-ui/*.service /etc/systemd/system/
+@@ -409,6 +451,7 @@
+     config_after_install
+     open_firewall
+     prepare_services
++    configure_acceleration
+ 
+     systemctl enable s-ui --now
+ 
+--- a/s-ui.sh
++++ b/s-ui.sh
+@@ -63,7 +63,7 @@
+ }
+ 
+ install() {
+-    bash <(curl -Ls https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh)
++    bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)
+     if [[ $? == 0 ]]; then
+         if [[ $# == 0 ]]; then
+             start
+@@ -82,7 +82,7 @@
+         fi
+         return 0
+     fi
+-    bash <(curl -Ls https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh)
++    bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)
+     if [[ $? == 0 ]]; then
+         LOGI "Update is complete, Panel has automatically restarted "
+         exit 0
+@@ -98,7 +98,7 @@
+     exit 1
+     fi
+ 
+-    download_link="https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh"
++    download_link="https://raw.githubusercontent.com/gffd01/diandian/main/install.sh"
+ 
+     install_command="bash <(curl -Ls $download_link) $panel_version"
+ 
+@@ -116,6 +116,10 @@
+     fi
+     systemctl stop s-ui
+     systemctl disable s-ui
++    if [[ -x /usr/local/s-ui/network-acceleration.sh ]]; then
++        /usr/local/s-ui/network-acceleration.sh purge || \
++            LOGE "Network acceleration rollback needs manual review"
++    fi
+     # Kill anything still running from a deleted binary so the port frees up.
+     pkill -9 -f '/usr/local/s-ui' 2>/dev/null
+     rm -f /etc/systemd/system/s-ui.service
+@@ -313,7 +317,7 @@
+ }
+ 
+ update_shell() {
+-    wget -O /usr/bin/s-ui -N --no-check-certificate https://github.com/Teminuosi/s-ui/raw/main/s-ui.sh
++    wget -O /usr/bin/s-ui -N --no-check-certificate https://github.com/gffd01/diandian/raw/main/s-ui.sh
+     if [[ $? != 0 ]]; then
+         echo ""
+         LOGE "Failed to download script, Please check whether the machine can connect Github"
+@@ -417,9 +421,22 @@
+     fi
+ }
+ 
+-bbr_menu() {
+-    echo -e "${green}\t1.${plain} Enable BBR"
+-    echo -e "${green}\t2.${plain} Disable BBR"
++run_acceleration() {
++    local action="${1:-status}"
++    local module="/usr/local/s-ui/network-acceleration.sh"
++    if [[ ! -x "$module" ]]; then
++        LOGE "Network acceleration module is missing. Run 's-ui update' first."
++        return 1
++    fi
++    "$module" "$action"
++}
++
++acceleration_menu() {
++    echo -e "${green}Current network acceleration status:${plain}"
++    run_acceleration status || true
++    echo ""
++    echo -e "${green}\t1.${plain} Enable BBR + fq"
++    echo -e "${green}\t2.${plain} Roll back to previous network settings"
+     echo -e "${green}\t0.${plain} Back to Main Menu"
+     read -p "Choose an option: " choice
+     case "$choice" in
+@@ -427,61 +444,18 @@
+         show_menu
+         ;;
+     1)
+-        enable_bbr
++        run_acceleration enable
++        before_show_menu
+         ;;
+     2)
+-        disable_bbr
+-        ;;
+-    *) echo "Invalid choice" ;;
+-    esac
+-}
+-
+-disable_bbr() {
+-    if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf || ! grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
+-        echo -e "${yellow}BBR is not currently enabled.${plain}"
+-        exit 0
+-    fi
+-    sed -i 's/net.core.default_qdisc=fq/net.core.default_qdisc=pfifo_fast/' /etc/sysctl.conf
+-    sed -i 's/net.ipv4.tcp_congestion_control=bbr/net.ipv4.tcp_congestion_control=cubic/' /etc/sysctl.conf
+-    sysctl -p
+-    if [[ $(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}') == "cubic" ]]; then
+-        echo -e "${green}BBR has been replaced with CUBIC successfully.${plain}"
+-    else
+-        echo -e "${red}Failed to replace BBR with CUBIC. Please check your system configuration.${plain}"
+-    fi
+-}
+-
+-enable_bbr() {
+-    if grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf && grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
+-        echo -e "${green}BBR is already enabled!${plain}"
+-        exit 0
+-    fi
+-    case "${release}" in
+-    ubuntu | debian | armbian)
+-        apt-get update && apt-get install -yqq --no-install-recommends ca-certificates
+-        ;;
+-    centos | almalinux | rocky | oracle)
+-        yum -y update && yum -y install ca-certificates
+-        ;;
+-    fedora)
+-        dnf -y update && dnf -y install ca-certificates
+-        ;;
+-    arch | manjaro | parch)
+-        pacman -Sy --noconfirm ca-certificates
++        run_acceleration rollback
++        before_show_menu
+         ;;
+     *)
+-        echo -e "${red}Unsupported operating system. Please check the script and install the necessary packages manually.${plain}\n"
+-        exit 1
++        LOGE "Invalid choice"
++        before_show_menu
+         ;;
+     esac
+-    echo "net.core.default_qdisc=fq" | tee -a /etc/sysctl.conf
+-    echo "net.ipv4.tcp_congestion_control=bbr" | tee -a /etc/sysctl.conf
+-    sysctl -p
+-    if [[ $(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}') == "bbr" ]]; then
+-        echo -e "${green}BBR has been enabled successfully.${plain}"
+-    else
+-        echo -e "${red}Failed to enable BBR. Please check your system configuration.${plain}"
+-    fi
+ }
+ 
+ install_acme() {
+@@ -804,6 +778,9 @@
+     echo -e "s-ui update       - Update"
+     echo -e "s-ui install      - Install"
+     echo -e "s-ui uninstall    - Uninstall"
++    echo -e "s-ui accel status - View TCP acceleration status"
++    echo -e "s-ui accel enable - Enable BBR + fq"
++    echo -e "s-ui accel rollback - Restore previous network settings"
+     echo -e "s-ui help         - Control Menu Usage"
+     echo -e "------------------------------------------"
+ }
+@@ -835,7 +812,7 @@
+   ${green}16.${plain} S-UI Enable Autostart
+   ${green}17.${plain} S-UI Disable Autostart
+ ————————————————————————————————
+-  ${green}18.${plain} Enable or Disable BBR
++  ${green}18.${plain} Network Acceleration (BBR + fq)
+   ${green}19.${plain} SSL Certificate Management
+   ${green}20.${plain} Cloudflare SSL Certificate
+ ————————————————————————————————
+@@ -903,7 +880,7 @@
+         check_install && disable s-ui
+         ;;
+     18)
+-        bbr_menu
++        acceleration_menu
+         ;;
+     19)
+         ssl_cert_issue_main
+@@ -952,6 +929,9 @@
+     "uninstall")
+         uninstall 0
+         ;;
++    "accel")
++        run_acceleration "${2:-status}"
++        ;;
+     *) show_usage ;;
+     esac
+ else

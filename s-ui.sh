@@ -63,7 +63,7 @@ before_show_menu() {
 }
 
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh)
+    bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -82,7 +82,7 @@ update() {
         fi
         return 0
     fi
-    bash <(curl -Ls https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh)
+    bash <(curl -Ls https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)
     if [[ $? == 0 ]]; then
         LOGI "Update is complete, Panel has automatically restarted "
         exit 0
@@ -98,7 +98,7 @@ custom_version() {
     exit 1
     fi
 
-    download_link="https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh"
+    download_link="https://raw.githubusercontent.com/gffd01/diandian/main/install.sh"
 
     install_command="bash <(curl -Ls $download_link) $panel_version"
 
@@ -116,6 +116,10 @@ uninstall() {
     fi
     systemctl stop s-ui
     systemctl disable s-ui
+    if [[ -x /usr/local/s-ui/network-acceleration.sh ]]; then
+        /usr/local/s-ui/network-acceleration.sh purge || \
+            LOGE "Network acceleration rollback needs manual review"
+    fi
     # Kill anything still running from a deleted binary so the port frees up.
     pkill -9 -f '/usr/local/s-ui' 2>/dev/null
     rm -f /etc/systemd/system/s-ui.service
@@ -313,7 +317,7 @@ show_log() {
 }
 
 update_shell() {
-    wget -O /usr/bin/s-ui -N --no-check-certificate https://github.com/Teminuosi/s-ui/raw/main/s-ui.sh
+    wget -O /usr/bin/s-ui -N --no-check-certificate https://github.com/gffd01/diandian/raw/main/s-ui.sh
     if [[ $? != 0 ]]; then
         echo ""
         LOGE "Failed to download script, Please check whether the machine can connect Github"
@@ -417,9 +421,22 @@ show_s-ui_status() {
     fi
 }
 
-bbr_menu() {
-    echo -e "${green}\t1.${plain} Enable BBR"
-    echo -e "${green}\t2.${plain} Disable BBR"
+run_acceleration() {
+    local action="${1:-status}"
+    local module="/usr/local/s-ui/network-acceleration.sh"
+    if [[ ! -x "$module" ]]; then
+        LOGE "Network acceleration module is missing. Run 's-ui update' first."
+        return 1
+    fi
+    "$module" "$action"
+}
+
+acceleration_menu() {
+    echo -e "${green}Current network acceleration status:${plain}"
+    run_acceleration status || true
+    echo ""
+    echo -e "${green}\t1.${plain} Enable BBR + fq"
+    echo -e "${green}\t2.${plain} Roll back to previous network settings"
     echo -e "${green}\t0.${plain} Back to Main Menu"
     read -p "Choose an option: " choice
     case "$choice" in
@@ -427,61 +444,18 @@ bbr_menu() {
         show_menu
         ;;
     1)
-        enable_bbr
+        run_acceleration enable
+        before_show_menu
         ;;
     2)
-        disable_bbr
-        ;;
-    *) echo "Invalid choice" ;;
-    esac
-}
-
-disable_bbr() {
-    if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf || ! grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
-        echo -e "${yellow}BBR is not currently enabled.${plain}"
-        exit 0
-    fi
-    sed -i 's/net.core.default_qdisc=fq/net.core.default_qdisc=pfifo_fast/' /etc/sysctl.conf
-    sed -i 's/net.ipv4.tcp_congestion_control=bbr/net.ipv4.tcp_congestion_control=cubic/' /etc/sysctl.conf
-    sysctl -p
-    if [[ $(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}') == "cubic" ]]; then
-        echo -e "${green}BBR has been replaced with CUBIC successfully.${plain}"
-    else
-        echo -e "${red}Failed to replace BBR with CUBIC. Please check your system configuration.${plain}"
-    fi
-}
-
-enable_bbr() {
-    if grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf && grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
-        echo -e "${green}BBR is already enabled!${plain}"
-        exit 0
-    fi
-    case "${release}" in
-    ubuntu | debian | armbian)
-        apt-get update && apt-get install -yqq --no-install-recommends ca-certificates
-        ;;
-    centos | almalinux | rocky | oracle)
-        yum -y update && yum -y install ca-certificates
-        ;;
-    fedora)
-        dnf -y update && dnf -y install ca-certificates
-        ;;
-    arch | manjaro | parch)
-        pacman -Sy --noconfirm ca-certificates
+        run_acceleration rollback
+        before_show_menu
         ;;
     *)
-        echo -e "${red}Unsupported operating system. Please check the script and install the necessary packages manually.${plain}\n"
-        exit 1
+        LOGE "Invalid choice"
+        before_show_menu
         ;;
     esac
-    echo "net.core.default_qdisc=fq" | tee -a /etc/sysctl.conf
-    echo "net.ipv4.tcp_congestion_control=bbr" | tee -a /etc/sysctl.conf
-    sysctl -p
-    if [[ $(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}') == "bbr" ]]; then
-        echo -e "${green}BBR has been enabled successfully.${plain}"
-    else
-        echo -e "${red}Failed to enable BBR. Please check your system configuration.${plain}"
-    fi
 }
 
 install_acme() {
@@ -804,6 +778,9 @@ show_usage() {
     echo -e "s-ui update       - Update"
     echo -e "s-ui install      - Install"
     echo -e "s-ui uninstall    - Uninstall"
+    echo -e "s-ui accel status - View TCP acceleration status"
+    echo -e "s-ui accel enable - Enable BBR + fq"
+    echo -e "s-ui accel rollback - Restore previous network settings"
     echo -e "s-ui help         - Control Menu Usage"
     echo -e "------------------------------------------"
 }
@@ -835,7 +812,7 @@ show_menu() {
   ${green}16.${plain} S-UI Enable Autostart
   ${green}17.${plain} S-UI Disable Autostart
 ————————————————————————————————
-  ${green}18.${plain} Enable or Disable BBR
+  ${green}18.${plain} Network Acceleration (BBR + fq)
   ${green}19.${plain} SSL Certificate Management
   ${green}20.${plain} Cloudflare SSL Certificate
 ————————————————————————————————
@@ -903,7 +880,7 @@ show_menu() {
         check_install && disable s-ui
         ;;
     18)
-        bbr_menu
+        acceleration_menu
         ;;
     19)
         ssl_cert_issue_main
@@ -951,6 +928,9 @@ if [[ $# > 0 ]]; then
         ;;
     "uninstall")
         uninstall 0
+        ;;
+    "accel")
+        run_acceleration "${2:-status}"
         ;;
     *) show_usage ;;
     esac

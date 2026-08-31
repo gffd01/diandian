@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+
+# S-UI managed TCP acceleration. This module owns only its sysctl drop-in and
+# state files, so enabling and rolling back never rewrites the user's existing
+# /etc/sysctl.conf or other tuning files.
+
+set -u
+
+red='\033[0;31m'
+green='\033[0;32m'
+yellow='\033[0;33m'
+plain='\033[0m'
+
+root_prefix="${SUI_ACCEL_ROOT:-}"
+sysctl_bin="${SUI_ACCEL_SYSCTL_BIN:-sysctl}"
+modprobe_bin="${SUI_ACCEL_MODPROBE_BIN:-modprobe}"
+state_dir="${root_prefix}/var/lib/s-ui-network-acceleration"
+state_file="${state_dir}/network-acceleration.state"
+preference_file="${state_dir}/network-acceleration.preference"
+sysctl_dir="${root_prefix}/etc/sysctl.d"
+sysctl_file="${sysctl_dir}/99-s-ui-network-acceleration.conf"
+
+info() { echo -e "${green}[acceleration]${plain} $*"; }
+warn() { echo -e "${yellow}[acceleration]${plain} $*"; }
+error() { echo -e "${red}[acceleration]${plain} $*" >&2; }
+
+require_root() {
+    if [[ "${SUI_ACCEL_TEST_MODE:-0}" != "1" && $EUID -ne 0 ]]; then
+        error "Please run this command as root."
+        return 1
+    fi
+}
+
+sysctl_get() {
+    "$sysctl_bin" -n "$1" 2>/dev/null
+}
+
+sysctl_set() {
+    "$sysctl_bin" -q -w "$1=$2" >/dev/null 2>&1
+}
+
+valid_sysctl_value() {
+    [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]]
+}
+
+write_preference() {
+    mkdir -p "$state_dir" || return 1
+    printf '%s\n' "$1" > "$preference_file"
+}
+
+read_preference() {
+    if [[ -f "$preference_file" ]]; then
+        head -n 1 "$preference_file" 2>/dev/null
+    fi
+}
+
+save_previous_state() {
+    local previous_qdisc previous_cc
+    previous_qdisc=$(sysctl_get net.core.default_qdisc) || return 1
+    previous_cc=$(sysctl_get net.ipv4.tcp_congestion_control) || return 1
+
+    if ! valid_sysctl_value "$previous_qdisc" || ! valid_sysctl_value "$previous_cc"; then
+        error "The current network settings could not be saved safely."
+        return 1
+    fi
+
+    umask 077
+    mkdir -p "$state_dir" || return 1
+    {
+        printf 'previous_qdisc=%s\n' "$previous_qdisc"
+        printf 'previous_congestion_control=%s\n' "$previous_cc"
+    } > "$state_file"
+}
+
+load_previous_state() {
+    previous_qdisc=""
+    previous_congestion_control=""
+    [[ -f "$state_file" ]] || return 1
+
+    local key value
+    while IFS='=' read -r key value; do
+        case "$key" in
+        previous_qdisc) previous_qdisc="$value" ;;
+        previous_congestion_control) previous_congestion_control="$value" ;;
+        esac
+    done < "$state_file"
+
+    valid_sysctl_value "$previous_qdisc" \
+        && valid_sysctl_value "$previous_congestion_control"
+}
+
+has_congestion_control() {
+    local wanted="$1" available item
+    available=$(sysctl_get net.ipv4.tcp_available_congestion_control) || return 1
+    for item in $available; do
+        [[ "$item" == "$wanted" ]] && return 0
+    done
+    return 1
+}
+
+load_kernel_modules() {
+    if command -v "$modprobe_bin" >/dev/null 2>&1; then
+        "$modprobe_bin" tcp_bbr >/dev/null 2>&1 || true
+        "$modprobe_bin" sch_fq >/dev/null 2>&1 || true
+    fi
+}
+
+runtime_is_accelerated() {
+    [[ "$(sysctl_get net.ipv4.tcp_congestion_control 2>/dev/null)" == "bbr" \
+        && "$(sysctl_get net.core.default_qdisc 2>/dev/null)" == "fq" ]]
+}
+
+restore_saved_runtime() {
+    load_previous_state || return 1
+    sysctl_set net.core.default_qdisc "$previous_qdisc" || return 1
+    sysctl_set net.ipv4.tcp_congestion_control "$previous_congestion_control" || return 1
+}
+
+enable_acceleration() {
+    require_root || return 1
+
+    load_kernel_modules
+    if ! has_congestion_control bbr; then
+        error "This kernel does not expose TCP BBR; S-UI will continue without acceleration."
+        return 1
+    fi
+
+    if [[ ! -f "$state_file" ]]; then
+        save_previous_state || {
+            error "Could not save the current network settings; nothing was changed."
+            return 1
+        }
+    fi
+
+    mkdir -p "$sysctl_dir" || return 1
+    local temporary_file="${sysctl_file}.tmp.$$"
+    {
+        echo '# Managed by S-UI. Use `s-ui accel rollback` instead of editing this file.'
+        echo 'net.core.default_qdisc = fq'
+        echo 'net.ipv4.tcp_congestion_control = bbr'
+    } > "$temporary_file" || return 1
+    chmod 0644 "$temporary_file"
+    mv -f "$temporary_file" "$sysctl_file"
+
+    if ! sysctl_set net.core.default_qdisc fq \
+        || ! sysctl_set net.ipv4.tcp_congestion_control bbr \
+        || ! runtime_is_accelerated; then
+        rm -f "$sysctl_file"
+        restore_saved_runtime >/dev/null 2>&1 || true
+        rm -f "$state_file"
+        error "The kernel rejected BBR + fq; previous settings were restored."
+        return 1
+    fi
+
+    write_preference enabled || return 1
+    info "TCP acceleration is enabled: BBR + fq."
+}
+
+rollback_acceleration() {
+    require_root || return 1
+    local purge_preference="${1:-}"
+    local had_state=0
+    [[ -f "$state_file" ]] && had_state=1
+
+    rm -f "$sysctl_file"
+
+    if [[ $had_state -eq 1 ]]; then
+        if ! restore_saved_runtime; then
+            error "The managed sysctl file was removed, but restoring the saved runtime values failed."
+            return 1
+        fi
+        rm -f "$state_file"
+        info "Previous network settings were restored."
+    else
+        warn "No S-UI acceleration state was found; no existing network values were changed."
+    fi
+
+    if [[ "$purge_preference" == "--purge" ]]; then
+        rm -f "$preference_file"
+        rmdir "$state_dir" >/dev/null 2>&1 || true
+    else
+        write_preference disabled || return 1
+        info "Automatic acceleration is disabled for future S-UI upgrades."
+    fi
+}
+
+show_status() {
+    local qdisc cc preference
+    qdisc=$(sysctl_get net.core.default_qdisc 2>/dev/null || echo unknown)
+    cc=$(sysctl_get net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)
+    preference=$(read_preference)
+    [[ -n "$preference" ]] || preference="default-enabled"
+
+    echo "TCP congestion control: $cc"
+    echo "Default queue discipline: $qdisc"
+    echo "S-UI preference: $preference"
+    if runtime_is_accelerated; then
+        info "Acceleration is active."
+    else
+        warn "Acceleration is not active."
+    fi
+}
+
+auto_enable() {
+    if [[ "$(read_preference)" == "disabled" ]]; then
+        warn "Keeping acceleration disabled because it was previously rolled back."
+        return 0
+    fi
+    enable_acceleration
+}
+
+case "${1:-status}" in
+enable) enable_acceleration ;;
+auto) auto_enable ;;
+disable | rollback) rollback_acceleration ;;
+purge) rollback_acceleration --purge ;;
+status) show_status ;;
+*)
+    echo "Usage: $0 {status|enable|auto|rollback|purge}" >&2
+    exit 2
+    ;;
+esac
