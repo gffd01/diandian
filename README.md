@@ -23,28 +23,7 @@ SUI_AUTO=1 bash <(curl -fsSL https://raw.githubusercontent.com/gffd01/diandian/m
 ```
 
 命令会自动识别服务器架构、下载本仓库最新稳定 Release、安装或升级 S-UI，并沿用上游的
-自动生成账号、面板路径、端口、API Token、开放防火墙和启动服务逻辑。安装完成后默认启用
-`BBR + fq` TCP 网络加速；如果当前内核不支持 BBR，会跳过加速但不会中断 S-UI 安装。
-
-如需从一开始保持系统原有网络设置：
-
-```bash
-SUI_ACCEL=0 SUI_AUTO=1 bash <(curl -fsSL https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)
-```
-
-安装后可以通过 `s-ui` 菜单第 18 项管理加速，也可以直接执行：
-
-```bash
-s-ui accel status
-s-ui accel enable
-s-ui accel rollback
-```
-
-安装脚本、S-UI 管理菜单、网络加速状态和常用操作提示默认使用中文显示；命令名、协议名及系统
-原生命令输出仍保留原格式，便于排错和保持兼容。
-
-回滚会恢复启用前保存的拥塞控制和队列算法，只删除 S-UI 自己创建的配置。手动回滚后，后续
-升级会保持关闭，除非再次执行 `s-ui accel enable` 或安装时显式设置 `SUI_ACCEL=1`。
+自动生成账号、面板路径、端口、API Token、开放防火墙和启动服务逻辑。
 
 如需恢复上游交互式安装方式：
 

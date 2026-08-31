@@ -29,14 +29,6 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v6.0.2
 
-      - name: Test installer and network acceleration scripts
-        shell: bash
-        run: |
-          bash -n install.sh
-          bash -n s-ui.sh
-          bash -n .github/scripts/network-acceleration.sh
-          bash .github/scripts/test-network-acceleration.sh
-
       - name: Verify clean frontend source
         shell: bash
         run: |
@@ -189,10 +181,6 @@ jobs:
           cp sui package/
           cp s-ui.service package/
           cp s-ui.sh package/
-          cp .github/scripts/network-acceleration.sh package/
-          chmod +x package/network-acceleration.sh
-          bash -n package/s-ui.sh
-          bash -n package/network-acceleration.sh
 
       - name: Package release archive
         shell: bash

@@ -30,12 +30,6 @@ mkdir -p "$repo_root/frontend"
 rsync -a --delete --exclude .git "$frontend_dir/" "$repo_root/frontend/"
 rm -f "$repo_root/.gitmodules"
 
-# Reapply this fork's installer/menu integration after the upstream rsync. The
-# patch intentionally fails if upstream changes the affected sections, so a
-# sync can never silently publish S-UI without the managed acceleration module.
-git -C "$repo_root" apply --check .github/scripts/runtime-customizations.patch
-git -C "$repo_root" apply .github/scripts/runtime-customizations.patch
-
 REPO_ROOT="$repo_root" BACKEND_SHA="$backend_sha" FRONTEND_SHA="$frontend_sha" python3 <<'PY'
 import os
 from pathlib import Path
@@ -105,22 +99,21 @@ replace_once(
 
 installer = root / "install.sh"
 install_text = installer.read_text(encoding="utf-8")
+replacements = {
+    "https://raw.githubusercontent.com/Teminuosi/s-ui/": "https://raw.githubusercontent.com/gffd01/diandian/",
+    "https://api.github.com/repos/Teminuosi/s-ui/releases": "https://api.github.com/repos/gffd01/diandian/releases",
+    "https://github.com/Teminuosi/s-ui/releases/download": "https://github.com/gffd01/diandian/releases/download",
+}
+for old, new in replacements.items():
+    if old not in install_text:
+        raise SystemExit(f"Expected installer reference was not found: {old}")
+    install_text = install_text.replace(old, new)
+
 if 'SUI_AUTO="${SUI_AUTO:-1}"' not in install_text:
     raise SystemExit("Upstream SUI_AUTO=1 automatic installation logic was not found")
-if 'SUI_ACCEL="${SUI_ACCEL:-auto}"' not in install_text:
-    raise SystemExit("Default-on S-UI acceleration integration was not found")
-if "安装完成，服务已启动" not in install_text:
-    raise SystemExit("Chinese installer messages were not found")
-if "Teminuosi/s-ui/releases" in install_text or "raw.githubusercontent.com/Teminuosi/s-ui" in install_text:
-    raise SystemExit("An upstream runtime URL remains in install.sh")
-
-menu_text = (root / "s-ui.sh").read_text(encoding="utf-8")
-if "network-acceleration.sh" not in menu_text:
-    raise SystemExit("Acceleration management menu integration was not found")
-if "S-UI 管理菜单" not in menu_text or "网络加速管理（BBR + fq）" not in menu_text:
-    raise SystemExit("Chinese S-UI management menu was not found")
-if "raw.githubusercontent.com/Teminuosi/s-ui" in menu_text or "github.com/Teminuosi/s-ui/raw" in menu_text:
-    raise SystemExit("An upstream runtime URL remains in s-ui.sh")
+if "Teminuosi/s-ui/releases" in install_text:
+    raise SystemExit("An upstream release URL remains in install.sh")
+installer.write_text(install_text, encoding="utf-8")
 
 blocked = ("3yuedaohang", "zhanzhang3yue", "banwagong")
 for path in (root / "frontend" / "src").rglob("*"):
@@ -138,15 +131,10 @@ for path in (root / "frontend" / "src").rglob("*"):
 )
 PY
 
-chmod +x \
-  "$repo_root/install.sh" \
-  "$repo_root/s-ui.sh" \
-  "$repo_root/.github/scripts/import-and-customize.sh" \
-  "$repo_root/.github/scripts/network-acceleration.sh"
+chmod +x "$repo_root/install.sh" "$repo_root/s-ui.sh" "$repo_root/.github/scripts/import-and-customize.sh"
 
 bash -n "$repo_root/install.sh"
 bash -n "$repo_root/s-ui.sh"
-bash -n "$repo_root/.github/scripts/network-acceleration.sh"
 
 echo "Imported backend:  $backend_sha"
 echo "Imported frontend: $frontend_sha"
