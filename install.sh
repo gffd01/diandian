@@ -417,7 +417,17 @@ download_release() {
         rm -f "$out" "$sums"
         return 1
     fi
-    expected=$(awk -v name="$asset_name" '$2 == name || $2 == "*" name { print $1; exit }' "$sums")
+    expected=$(awk -v name="$asset_name" '
+        {
+            candidate = $2
+            sub(/^\*/, "", candidate)
+            sub(/^\.\//, "", candidate)
+            if (candidate == name) {
+                print $1
+                exit
+            }
+        }
+    ' "$sums")
     [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] || {
         echo -e "${red}No valid SHA256 entry was found for ${asset_name}.${plain}"
         rm -f "$out" "$sums"
