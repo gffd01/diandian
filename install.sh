@@ -11,22 +11,39 @@ cur_dir=$(pwd)
 
 # Full-auto is the DEFAULT install mode: every command runs start-to-finish with
 # no prompts. On a fresh install it generates random admin credentials + a random
-# panel path + free ports. The panel listens on localhost, API access is disabled,
-# and the firewall is left unchanged unless explicitly enabled. On an upgrade it
-# keeps existing settings untouched. To get the old interactive flow back, set
-# SUI_AUTO=0 (or n). Examples after reviewing this file:
+# panel path + free ports. The default "direct" access mode keeps the old one-click
+# experience: the panel listens publicly, the panel/subscription ports are opened
+# when a supported host firewall is active, and a time-limited API token is
+# generated for central management. Set SUI_ACCESS_MODE=tunnel to keep the panel
+# on localhost instead. To get the interactive flow, set SUI_AUTO=0 (or n).
+# Examples after reviewing this file:
 #   sudo ./install.sh             # auto (default)
 #   SUI_AUTO=0 sudo ./install.sh  # interactive
 SUI_AUTO="${SUI_AUTO:-1}"
 SUI_REPO="${SUI_REPO:-gffd01/diandian}"
-SUI_ENABLE_API_TOKEN="${SUI_ENABLE_API_TOKEN:-0}"
+SUI_ACCESS_MODE="${SUI_ACCESS_MODE:-direct}"
 SUI_API_TOKEN_DAYS="${SUI_API_TOKEN_DAYS:-30}"
-SUI_OPEN_FIREWALL="${SUI_OPEN_FIREWALL:-0}"
 SUI_NODE_PORTS="${SUI_NODE_PORTS:-}"
 SUI_ENABLE_TUNING="${SUI_ENABLE_TUNING:-1}"
-SUI_PANEL_LISTEN="${SUI_PANEL_LISTEN:-127.0.0.1}"
 SUI_SUB_LISTEN="${SUI_SUB_LISTEN:-0.0.0.0}"
 install_tmp_dir=""
+
+case "$SUI_ACCESS_MODE" in
+direct)
+    SUI_PANEL_LISTEN="${SUI_PANEL_LISTEN:-0.0.0.0}"
+    SUI_OPEN_FIREWALL="${SUI_OPEN_FIREWALL:-1}"
+    SUI_ENABLE_API_TOKEN="${SUI_ENABLE_API_TOKEN:-1}"
+    ;;
+tunnel)
+    SUI_PANEL_LISTEN="${SUI_PANEL_LISTEN:-127.0.0.1}"
+    SUI_OPEN_FIREWALL="${SUI_OPEN_FIREWALL:-0}"
+    SUI_ENABLE_API_TOKEN="${SUI_ENABLE_API_TOKEN:-0}"
+    ;;
+*)
+    echo -e "${red}Invalid SUI_ACCESS_MODE: ${SUI_ACCESS_MODE}. Use direct or tunnel.${plain}" >&2
+    exit 1
+    ;;
+esac
 
 cleanup_install_tmp() {
     if [[ -n "$install_tmp_dir" && "$install_tmp_dir" == /tmp/s-ui-install.* ]]; then
@@ -232,7 +249,9 @@ config_after_install() {
     /usr/local/s-ui/sui migrate
 
     # Full-auto mode: no prompts. Fresh install -> random credentials + random
-    # panel path; upgrade -> keep existing settings untouched.
+    # panel path. Upgrades preserve credentials, paths and ports, but re-apply the
+    # explicitly selected access mode so an earlier localhost-only installation
+    # can be repaired by simply rerunning the direct-mode installer.
     if is_auto; then
         if [[ ! -f "/usr/local/s-ui/db/s-ui.db" ]]; then
             local config_account=$(gen_random_string 10)
@@ -260,6 +279,7 @@ config_after_install() {
             echo -e "${green}panel port:${config_port}${plain}"
             echo -e "${green}panel path:/${config_path}/${plain}"
             echo -e "${green}sub port:${config_subPort}${plain}"
+            echo -e "${green}access mode:${SUI_ACCESS_MODE}${plain}"
             if [[ "$SUI_PANEL_LISTEN" == "127.0.0.1" || "$SUI_PANEL_LISTEN" == "::1" ]]; then
                 echo -e "${yellow}panel access: localhost only (secure default). Use an SSH tunnel or configure HTTPS before public access.${plain}"
             fi
@@ -270,11 +290,21 @@ config_after_install() {
             echo -e "###############################################"
             echo -e "${red}If you forget your login info, type ${green}s-ui${red} on the server for the menu.${plain}"
         else
-            echo -e "${yellow}[auto] Upgrade detected: keeping existing settings.${plain}"
+            echo -e "${yellow}[auto] Upgrade detected: keeping credentials, paths and ports.${plain}"
             # Guard against a port clash with another panel on the same box.
             resolve_port_clash
+            /usr/local/s-ui/sui setting -listen "${SUI_PANEL_LISTEN}" -subListen "${SUI_SUB_LISTEN}"
+            local up_token=""
+            if [[ "$SUI_ENABLE_API_TOKEN" == "1" ]]; then
+                up_token=$(/usr/local/s-ui/sui token -desc install -days "$SUI_API_TOKEN_DAYS" 2>/dev/null || true)
+            fi
             echo -e "###############################################"
             /usr/local/s-ui/sui admin -show 2>/dev/null
+            echo -e "${green}access mode:${SUI_ACCESS_MODE}${plain}"
+            if [[ -n "$up_token" ]]; then
+                echo -e "${green}API token (copy the line below):${plain}"
+                echo -e "${up_token}"
+            fi
             echo -e "${red}If you forget your login info, type ${green}s-ui${red} on the server for the menu.${plain}"
             echo -e "###############################################"
         fi
@@ -348,7 +378,7 @@ config_after_install() {
 # firewall so nodes are reachable out of the box. Full-auto only.
 open_firewall() {
     [[ "$SUI_OPEN_FIREWALL" == "1" ]] || {
-        echo -e "${yellow}[secure] Host firewall was not changed. Open only the ports you actually use.${plain}"
+        echo -e "${yellow}[firewall] Host firewall was not changed. Open only the ports you actually use.${plain}"
         return 0
     }
     local panel_port sub_port
@@ -368,7 +398,7 @@ open_firewall() {
             done
         fi
         ufw reload > /dev/null 2>&1
-        echo -e "${green}[secure] Firewall opened only for the panel, subscription and explicitly supplied node ports.${plain}"
+        echo -e "${green}[firewall] Opened the panel/subscription ports and explicitly supplied node ports.${plain}"
     elif command -v firewall-cmd > /dev/null 2>&1 && firewall-cmd --state > /dev/null 2>&1; then
         if [[ "$SUI_PANEL_LISTEN" != "127.0.0.1" && "$SUI_PANEL_LISTEN" != "::1" ]]; then
             [[ -n "$panel_port" ]] && firewall-cmd --permanent --add-port="${panel_port}/tcp" > /dev/null 2>&1
@@ -383,7 +413,7 @@ open_firewall() {
             done
         fi
         firewall-cmd --reload > /dev/null 2>&1
-        echo -e "${green}[secure] Firewall opened only for the panel, subscription and explicitly supplied node ports.${plain}"
+        echo -e "${green}[firewall] Opened the panel/subscription ports and explicitly supplied node ports.${plain}"
     fi
 }
 

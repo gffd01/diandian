@@ -231,6 +231,6 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "S-UI Clean ${RELEASE_TAG}" \
-              --notes "Clean source build from commit ${GITHUB_SHA}. Includes verified release checksums, safer installer and update flow, localhost-only panel defaults, opt-in API/firewall access, and conservative network tuning." \
+              --notes "Clean source build from commit ${GITHUB_SHA}. Includes verified release checksums, direct or tunnel access modes, time-limited API management, minimal firewall rules, and conservative network tuning." \
               --latest
           fi

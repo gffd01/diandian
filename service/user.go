@@ -186,17 +186,25 @@ func (s *UserService) DeleteToken(id string) error {
 	return db.Model(model.Tokens{}).Where("id = ?", id).Delete(&model.Tokens{}).Error
 }
 
-// GetOrCreateToken returns an existing non-expired token if there is one, else
-// creates a new one. Used so install/upgrade can print a stable token without
-// piling up new ones on every run.
-func (s *UserService) GetOrCreateToken(username string, desc string) (string, error) {
+// GetOrCreateToken returns the newest matching, non-expired token if there is
+// one, otherwise it creates a token with the requested validity. This keeps
+// repeated installer runs idempotent instead of piling up management tokens.
+func (s *UserService) GetOrCreateToken(username string, desc string, expiryDays int64) (string, error) {
 	db := database.GetDB()
+	var userID uint
+	if err := db.Model(model.User{}).Where("username = ?", username).Select("id").Scan(&userID).Error; err != nil {
+		return "", err
+	}
 	var existing model.Tokens
 	err := db.Model(model.Tokens{}).
-		Where("(expiry == 0 or expiry > ?)", time.Now().Unix()).
+		Where("user_id = ? AND desc = ? AND (expiry == 0 OR expiry > ?)", userID, desc, time.Now().Unix()).
+		Order("id DESC").
 		First(&existing).Error
 	if err == nil && existing.Token != "" {
 		return existing.Token, nil
 	}
-	return s.AddToken(username, 0, desc)
+	if err != nil && !database.IsNotFound(err) {
+		return "", err
+	}
+	return s.AddToken(username, expiryDays, desc)
 }
