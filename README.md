@@ -19,11 +19,11 @@
 支持 Debian、Ubuntu 等采用 systemd 的 Linux 系统。请使用 root 用户复制整行执行：
 
 ```bash
-curl --fail --location --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/gffd01/diandian/secure-installer-v1/install.sh -o /tmp/s-ui-secure-install.sh && echo 'e03d757a3d60ee972fdbad377df339b750540fd415aa11888038256d3d195078  /tmp/s-ui-secure-install.sh' | sha256sum --check - && chmod 700 /tmp/s-ui-secure-install.sh && SUI_AUTO=1 /tmp/s-ui-secure-install.sh clean-14
+curl --fail --location --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/gffd01/diandian/secure-installer-v1/install.sh -o /tmp/s-ui-secure-install.sh && echo '4300dfeb62360bb823ac113d351e3f2fa009a84162be693a4e1dd27a98fd9a2b  /tmp/s-ui-secure-install.sh' | sha256sum --check - && chmod 700 /tmp/s-ui-secure-install.sh && SUI_AUTO=1 /tmp/s-ui-secure-install.sh clean-15
 ```
 
 命令会先验证安装脚本；只有显示 `/tmp/s-ui-secure-install.sh: OK` 才会继续。随后自动识别服务器
-架构，下载并校验 `clean-14` Release，然后安装或升级 S-UI。
+架构，下载并校验 `clean-15` Release，然后安装或升级 S-UI。
 新装时会生成随机账号、密码、面板路径和空闲端口。面板默认只监听本机，API Token 默认不创建，
 防火墙默认不修改。
 
@@ -33,7 +33,7 @@ curl --fail --location --proto '=https' --tlsv1.2 https://raw.githubusercontent.
 git clone --depth=1 --branch secure-installer-v1 --single-branch https://github.com/gffd01/diandian.git
 cd diandian
 less install.sh
-SUI_AUTO=1 ./install.sh clean-14
+SUI_AUTO=1 ./install.sh clean-15
 ```
 
 公网面板、香港中转集中管理、限时 API Token、防火墙和网络优化说明见
