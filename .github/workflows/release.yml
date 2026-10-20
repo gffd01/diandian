@@ -181,6 +181,7 @@ jobs:
           cp sui package/
           cp s-ui.service package/
           cp s-ui.sh package/
+          cp install.sh package/
 
       - name: Package release archive
         shell: bash
@@ -210,19 +211,26 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Generate release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum ./*.tar.gz > SHA256SUMS
+
       - name: Publish stable GitHub release
         shell: bash
         run: |
           set -euo pipefail
           cd release-assets
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" ./*.tar.gz --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$RELEASE_TAG" ./*.tar.gz ./SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
             gh release edit "$RELEASE_TAG" --latest --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$RELEASE_TAG" ./*.tar.gz \
+            gh release create "$RELEASE_TAG" ./*.tar.gz ./SHA256SUMS \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "S-UI Clean ${RELEASE_TAG}" \
-              --notes "Clean source build from commit ${GITHUB_SHA}. Promotional frontend links removed; Teminuosi S-UI functionality and SUI_AUTO=1 installation preserved." \
+              --notes "Clean source build from commit ${GITHUB_SHA}. Includes verified release checksums, safer installer and update flow, localhost-only panel defaults, opt-in API/firewall access, and conservative network tuning." \
               --latest
           fi

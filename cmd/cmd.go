@@ -20,21 +20,27 @@ func ParseCmd() {
 
 	var tokenDesc string
 	var tokenNew bool
+	var tokenDays int64
 	tokenCmd.StringVar(&tokenDesc, "desc", "", "token description")
 	tokenCmd.BoolVar(&tokenNew, "new", false, "force a new token instead of reusing an existing one")
+	tokenCmd.Int64Var(&tokenDays, "days", 30, "token validity in days; use 0 only for an intentional non-expiring token")
 
 	var username string
 	var password string
+	var listen string
 	var port int
 	var path string
+	var subListen string
 	var subPort int
 	var subPath string
 	var reset bool
 	var show bool
 	settingCmd.BoolVar(&reset, "reset", false, "reset all settings")
 	settingCmd.BoolVar(&show, "show", false, "show current settings")
+	settingCmd.StringVar(&listen, "listen", "", "set panel listen address")
 	settingCmd.IntVar(&port, "port", 0, "set panel port")
 	settingCmd.StringVar(&path, "path", "", "set panel path")
+	settingCmd.StringVar(&subListen, "subListen", "", "set subscription listen address")
 	settingCmd.IntVar(&subPort, "subPort", 0, "set sub port")
 	settingCmd.StringVar(&subPath, "subPath", "", "set sub path")
 
@@ -97,7 +103,7 @@ func ParseCmd() {
 			fmt.Println(err)
 			return
 		}
-		genToken(tokenDesc, tokenNew)
+		genToken(tokenDesc, tokenNew, tokenDays)
 
 	case "uri":
 		getPanelURI()
@@ -117,7 +123,7 @@ func ParseCmd() {
 		case reset:
 			resetSetting()
 		default:
-			updateSetting(port, path, subPort, subPath)
+			updateSetting(listen, port, path, subListen, subPort, subPath)
 			showSetting()
 		}
 	default:

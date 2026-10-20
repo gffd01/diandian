@@ -2,6 +2,9 @@ package service
 
 import (
 	"encoding/json"
+	"net/url"
+	"os"
+	"strings"
 
 	"github.com/alireza0/s-ui/database"
 	"github.com/alireza0/s-ui/database/model"
@@ -13,6 +16,26 @@ import (
 // ServerListService manages the saved panel addresses (the server launcher).
 // Note: distinct from ServerService (which reports this host's system info).
 type ServerListService struct{}
+
+func normalizeRemotePanelURL(rawURL string) (string, error) {
+	remoteURL, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || remoteURL.Host == "" {
+		return "", common.NewError("invalid remote panel URL")
+	}
+	if remoteURL.User != nil {
+		return "", common.NewError("remote panel URL must not contain credentials")
+	}
+	switch remoteURL.Scheme {
+	case "https":
+	case "http":
+		if os.Getenv("SUI_ALLOW_INSECURE_REMOTE") != "1" {
+			return "", common.NewError("remote panel URL must use HTTPS")
+		}
+	default:
+		return "", common.NewError("remote panel URL must use HTTPS")
+	}
+	return strings.TrimRight(remoteURL.String(), "/") + "/", nil
+}
 
 func (s *ServerListService) GetAll() ([]model.Server, error) {
 	db := database.GetDB()
@@ -41,6 +64,11 @@ func (s *ServerListService) Save(tx *gorm.DB, act string, data json.RawMessage) 
 		if err := json.Unmarshal(data, &server); err != nil {
 			return err
 		}
+		normalizedURL, err := normalizeRemotePanelURL(server.Url)
+		if err != nil {
+			return err
+		}
+		server.Url = normalizedURL
 		return tx.Save(&server).Error
 	case "del":
 		var id uint

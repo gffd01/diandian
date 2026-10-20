@@ -48,6 +48,10 @@ confirm() {
     fi
 }
 
+valid_domain() {
+    [[ "$1" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$ ]]
+}
+
 confirm_restart() {
     confirm "Restart the ${1} service" "y"
     if [[ $? == 0 ]]; then
@@ -62,8 +66,24 @@ before_show_menu() {
     show_menu
 }
 
+run_secure_installer() {
+    local installer rc
+    installer=$(mktemp)
+    if [[ -r /usr/local/s-ui/install.sh ]]; then
+        cp /usr/local/s-ui/install.sh "$installer"
+    else
+        rm -f "$installer"
+        LOGE "Local verified installer is missing. Reinstall from a trusted release."
+        return 1
+    fi
+    bash "$installer" "$@"
+    rc=$?
+    rm -f "$installer"
+    return "$rc"
+}
+
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh)
+    run_secure_installer
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -82,7 +102,7 @@ update() {
         fi
         return 0
     fi
-    bash <(curl -Ls https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh)
+    run_secure_installer
     if [[ $? == 0 ]]; then
         LOGI "Update is complete, Panel has automatically restarted "
         exit 0
@@ -98,12 +118,8 @@ custom_version() {
     exit 1
     fi
 
-    download_link="https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh"
-
-    install_command="bash <(curl -Ls $download_link) $panel_version"
-
     echo "Downloading and installing panel version $panel_version..."
-    eval $install_command
+    run_secure_installer "$panel_version"
 }
 
 uninstall() {
@@ -147,26 +163,40 @@ reset_admin() {
 }
 
 set_admin() {
-    echo "It is not recommended to set admin's credentials to a complex text."
+    echo "Use a unique username and a strong password."
     read -p "Please set up your username:" config_account
-    read -p "Please set up your password:" config_password
-    /usr/local/s-ui/sui admin -username ${config_account} -password ${config_password}
+    read -rsp "Please set up your password:" config_password
+    echo
+    /usr/local/s-ui/sui admin -username "$config_account" -password "$config_password"
     before_show_menu
 }
 
-show_api_token() {
-    # Print the central-management APIv2 token. Without -new this reuses the
-    # existing token (idempotent), so viewing it never piles up new tokens.
-    local token=$(/usr/local/s-ui/sui token -desc menu 2>/dev/null)
-    if [[ -n "$token" ]]; then
-        echo -e "${green}API token (copy the line below):${plain}"
-        echo -e "${token}"
+create_api_token() {
+    local days token
+    echo -e "${red}Warning: this token grants full remote administration, not read-only monitoring.${plain}"
+    confirm "Create a new time-limited API token" "n" || {
+        before_show_menu
+        return
+    }
+    read -p "Validity in days [30]: " days
+    days="${days:-30}"
+    if [[ ! "$days" =~ ^[0-9]+$ ]] || (( days < 1 || days > 365 )); then
+        LOGE "Validity must be a whole number from 1 to 365 days."
+        before_show_menu
+        return 1
     fi
+    token=$(/usr/local/s-ui/sui token -desc central-management -new -days "$days" 2>/dev/null)
+    if [[ -n "$token" ]]; then
+        echo -e "${green}API token (shown once; expires in ${days} days):${plain}"
+        echo -e "${token}"
+    else
+        LOGE "Token creation failed."
+    fi
+    before_show_menu
 }
 
 view_admin() {
     /usr/local/s-ui/sui admin -show
-    show_api_token
     before_show_menu
 }
 
@@ -202,7 +232,6 @@ set_setting() {
 view_setting() {
     /usr/local/s-ui/sui setting -show
     view_uri
-    show_api_token
     before_show_menu
 }
 
@@ -313,15 +342,8 @@ show_log() {
 }
 
 update_shell() {
-    wget -O /usr/bin/s-ui -N --no-check-certificate https://github.com/Teminuosi/s-ui/raw/main/s-ui.sh
-    if [[ $? != 0 ]]; then
-        echo ""
-        LOGE "Failed to download script, Please check whether the machine can connect Github"
-        before_show_menu
-    else
-        chmod +x /usr/bin/s-ui
-        LOGI "Upgrade script succeeded, Please rerun the script" && exit 0
-    fi
+    LOGI "The management script is shipped with the verified panel release. Use the normal update option."
+    before_show_menu
 }
 
 check_status() {
@@ -437,13 +459,19 @@ bbr_menu() {
 }
 
 disable_bbr() {
-    if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf || ! grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
+    local tuning_file="/etc/sysctl.d/99-s-ui-network.conf"
+    if [[ ! -f "$tuning_file" ]] || ! grep -Eq '^net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr$' "$tuning_file"; then
         echo -e "${yellow}BBR is not currently enabled.${plain}"
-        exit 0
+        return 0
     fi
-    sed -i 's/net.core.default_qdisc=fq/net.core.default_qdisc=pfifo_fast/' /etc/sysctl.conf
-    sed -i 's/net.ipv4.tcp_congestion_control=bbr/net.ipv4.tcp_congestion_control=cubic/' /etc/sysctl.conf
-    sysctl -p
+    sed -i \
+        -e '/^net\.core\.default_qdisc[[:space:]]*=/d' \
+        -e '/^net\.ipv4\.tcp_congestion_control[[:space:]]*=/d' \
+        "$tuning_file"
+    printf '%s\n' \
+        'net.core.default_qdisc = fq_codel' \
+        'net.ipv4.tcp_congestion_control = cubic' >> "$tuning_file"
+    sysctl --system >/dev/null 2>&1 || true
     if [[ $(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}') == "cubic" ]]; then
         echo -e "${green}BBR has been replaced with CUBIC successfully.${plain}"
     else
@@ -452,31 +480,26 @@ disable_bbr() {
 }
 
 enable_bbr() {
-    if grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf && grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
+    local tuning_file="/etc/sysctl.d/99-s-ui-network.conf"
+    if [[ -f "$tuning_file" ]] && grep -Eq '^net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr$' "$tuning_file"; then
         echo -e "${green}BBR is already enabled!${plain}"
-        exit 0
+        return 0
     fi
-    case "${release}" in
-    ubuntu | debian | armbian)
-        apt-get update && apt-get install -yqq --no-install-recommends ca-certificates
-        ;;
-    centos | almalinux | rocky | oracle)
-        yum -y update && yum -y install ca-certificates
-        ;;
-    fedora)
-        dnf -y update && dnf -y install ca-certificates
-        ;;
-    arch | manjaro | parch)
-        pacman -Sy --noconfirm ca-certificates
-        ;;
-    *)
-        echo -e "${red}Unsupported operating system. Please check the script and install the necessary packages manually.${plain}\n"
-        exit 1
-        ;;
-    esac
-    echo "net.core.default_qdisc=fq" | tee -a /etc/sysctl.conf
-    echo "net.ipv4.tcp_congestion_control=bbr" | tee -a /etc/sysctl.conf
-    sysctl -p
+    if ! modprobe tcp_bbr >/dev/null 2>&1 \
+        || ! sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr; then
+        echo -e "${red}This kernel does not provide BBR. No system settings were changed.${plain}"
+        return 1
+    fi
+    mkdir -p /etc/sysctl.d
+    touch "$tuning_file"
+    sed -i \
+        -e '/^net\.core\.default_qdisc[[:space:]]*=/d' \
+        -e '/^net\.ipv4\.tcp_congestion_control[[:space:]]*=/d' \
+        "$tuning_file"
+    printf '%s\n' \
+        'net.core.default_qdisc = fq' \
+        'net.ipv4.tcp_congestion_control = bbr' >> "$tuning_file"
+    sysctl --system >/dev/null 2>&1 || true
     if [[ $(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}') == "bbr" ]]; then
         echo -e "${green}BBR has been enabled successfully.${plain}"
     else
@@ -485,16 +508,10 @@ enable_bbr() {
 }
 
 install_acme() {
-    cd ~
-    LOGI "install acme..."
-    curl https://get.acme.sh | sh
-    if [ $? -ne 0 ]; then
-        LOGE "install acme failed"
-        return 1
-    else
-        LOGI "install acme succeed"
-    fi
-    return 0
+    LOGE "Automatic acme.sh installation is disabled in this secure build."
+    LOGI "This prevents an unpinned internet script from running as root."
+    LOGI "Install a reviewed acme.sh release manually, or choose the self-signed certificate option."
+    return 1
 }
 
 ssl_cert_issue_main() {
@@ -508,13 +525,15 @@ ssl_cert_issue_main() {
         2) 
             local domain=""
             read -p "Please enter your domain name to revoke the certificate: " domain
-            ~/.acme.sh/acme.sh --revoke -d ${domain}
+            valid_domain "$domain" || { LOGE "Invalid domain name"; return 1; }
+            ~/.acme.sh/acme.sh --revoke -d "$domain"
             LOGI "Certificate revoked"
             ;;
         3)
             local domain=""
             read -p "Please enter your domain name to forcefully renew an SSL certificate: " domain
-            ~/.acme.sh/acme.sh --renew -d ${domain} --force ;;
+            valid_domain "$domain" || { LOGE "Invalid domain name"; return 1; }
+            ~/.acme.sh/acme.sh --renew -d "$domain" --force ;;
         4)
             generate_self_signed_cert
             ;;
@@ -558,11 +577,14 @@ ssl_cert_issue() {
 
     local domain=""
     read -p "Please enter your domain name:" domain
+    valid_domain "$domain" || { LOGE "Invalid domain name"; return 1; }
     LOGD "your domain is:${domain},check it..."
-    local currentCert=$(~/.acme.sh/acme.sh --list | tail -1 | awk '{print $1}')
+    local currentCert
+    currentCert=$(~/.acme.sh/acme.sh --list | tail -1 | awk '{print $1}')
 
-    if [ ${currentCert} == ${domain} ]; then
-        local certInfo=$(~/.acme.sh/acme.sh --list)
+    if [[ "$currentCert" == "$domain" ]]; then
+        local certInfo
+        certInfo=$(~/.acme.sh/acme.sh --list)
         LOGE "system already has certs here,can not issue again,current certs details:"
         LOGI "$certInfo"
         exit 1
@@ -578,28 +600,30 @@ ssl_cert_issue() {
         mkdir -p "$certPath"
     fi
 
-    local WebPort=80
+    local WebPort
     read -p "please choose which port do you use,default will be 80 port:" WebPort
-    if [[ ${WebPort} -gt 65535 || ${WebPort} -lt 1 ]]; then
-        LOGE "your input ${WebPort} is invalid,will use default port"
+    WebPort="${WebPort:-80}"
+    if [[ ! "$WebPort" =~ ^[0-9]+$ ]] || (( WebPort > 65535 || WebPort < 1 )); then
+        LOGE "your input ${WebPort} is invalid,will use default port 80"
+        WebPort=80
     fi
     LOGI "will use port:${WebPort} to issue certs,please make sure this port is open..."
     ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-    ~/.acme.sh/acme.sh --issue -d ${domain} --standalone --httpport ${WebPort}
+    ~/.acme.sh/acme.sh --issue -d "$domain" --standalone --httpport "$WebPort"
     if [ $? -ne 0 ]; then
         LOGE "issue certs failed,please check logs"
-        rm -rf ~/.acme.sh/${domain}
+        rm -rf -- "$HOME/.acme.sh/$domain"
         exit 1
     else
         LOGE "issue certs succeed,installing certs..."
     fi
-    ~/.acme.sh/acme.sh --installcert -d ${domain} \
-        --key-file /root/cert/${domain}/privkey.pem \
-        --fullchain-file /root/cert/${domain}/fullchain.pem
+    ~/.acme.sh/acme.sh --installcert -d "$domain" \
+        --key-file "/root/cert/${domain}/privkey.pem" \
+        --fullchain-file "/root/cert/${domain}/fullchain.pem"
 
     if [ $? -ne 0 ]; then
         LOGE "install certs failed,exit"
-        rm -rf ~/.acme.sh/${domain}
+        rm -rf -- "$HOME/.acme.sh/$domain"
         exit 1
     else
         LOGI "install certs succeed,enable auto renew..."
@@ -608,13 +632,15 @@ ssl_cert_issue() {
     ~/.acme.sh/acme.sh --upgrade --auto-upgrade
     if [ $? -ne 0 ]; then
         LOGE "auto renew failed, certs details:"
-        ls -lah cert/*
-        chmod 755 $certPath/*
+        ls -lah "$certPath"
+        chmod 600 "$certPath/privkey.pem" 2>/dev/null || true
+        chmod 644 "$certPath/fullchain.pem" 2>/dev/null || true
         exit 1
     else
         LOGI "auto renew succeed, certs details:"
-        ls -lah cert/*
-        chmod 755 $certPath/*
+        ls -lah "$certPath"
+        chmod 600 "$certPath/privkey.pem"
+        chmod 644 "$certPath/fullchain.pem"
     fi
 }
 
@@ -657,21 +683,23 @@ ssl_cert_issue_CF() {
 
                 CF_Domain=""
                 if [ ! -d "$certPath" ]; then
-                    mkdir -p $certPath
+                    mkdir -p "$certPath"
                 else
-                    rm -rf $certPath
-                    mkdir -p $certPath
+                    rm -rf -- "$certPath"
+                    mkdir -p "$certPath"
                 fi
 
                 LOGD "Please set a domain name:"
                 read -p "Input your domain here: " CF_Domain
+                valid_domain "$CF_Domain" || { LOGE "Invalid domain name"; return 1; }
                 LOGD "Your domain name is set to: ${CF_Domain}"
 
                 CF_GlobalKey=""
                 CF_AccountEmail=""
                 LOGD "Please set the API key:"
-                read -p "Input your key here: " CF_GlobalKey
-                LOGD "Your API key is: ${CF_GlobalKey}"
+                read -rsp "Input your key here: " CF_GlobalKey
+                echo
+                LOGD "API key accepted (hidden)."
 
                 LOGD "Please set up registered email:"
                 read -p "Input your email here: " CF_AccountEmail
@@ -686,7 +714,7 @@ ssl_cert_issue_CF() {
                 export CF_Key="${CF_GlobalKey}"
                 export CF_Email="${CF_AccountEmail}"
 
-                ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${CF_Domain} -d *.${CF_Domain} $force_flag --log
+                ~/.acme.sh/acme.sh --issue --dns dns_cf -d "$CF_Domain" -d "*.${CF_Domain}" $force_flag --log
                 if [ $? -ne 0 ]; then
                     LOGE "Certificate issuance failed, script exiting..."
                     exit 1
@@ -694,15 +722,15 @@ ssl_cert_issue_CF() {
                     LOGI "Certificate issued Successfully, Installing..."
                 fi
 
-                mkdir -p ${certPath}/${CF_Domain}
+                mkdir -p "${certPath}/${CF_Domain}"
                 if [ $? -ne 0 ]; then
                     LOGE "Failed to create directory: ${certPath}/${CF_Domain}"
                     exit 1
                 fi
 
-                ~/.acme.sh/acme.sh --installcert -d ${CF_Domain} -d *.${CF_Domain} \
-                    --fullchain-file ${certPath}/${CF_Domain}/fullchain.pem \
-                    --key-file ${certPath}/${CF_Domain}/privkey.pem
+                ~/.acme.sh/acme.sh --installcert -d "$CF_Domain" -d "*.${CF_Domain}" \
+                    --fullchain-file "${certPath}/${CF_Domain}/fullchain.pem" \
+                    --key-file "${certPath}/${CF_Domain}/privkey.pem"
 
                 if [ $? -ne 0 ]; then
                     LOGE "Certificate installation failed, script exiting..."
@@ -717,8 +745,10 @@ ssl_cert_issue_CF() {
                     exit 1
                 else
                     LOGI "The certificate is installed and auto-renewal is turned on."
-                    ls -lah ${certPath}/${CF_Domain}
-                    chmod 755 ${certPath}/${CF_Domain}
+                    ls -lah "${certPath}/${CF_Domain}"
+                    chmod 700 "${certPath}/${CF_Domain}"
+                    chmod 600 "${certPath}/${CF_Domain}/privkey.pem"
+                    chmod 644 "${certPath}/${CF_Domain}/fullchain.pem"
                 fi
             fi
             show_menu
@@ -839,11 +869,12 @@ show_menu() {
   ${green}19.${plain} SSL Certificate Management
   ${green}20.${plain} Cloudflare SSL Certificate
 ————————————————————————————————
-  ${green}21.${plain} Update Menu Script
+  ${green}21.${plain} Create time-limited API token
+  ${green}22.${plain} Update Menu Script
 ————————————————————————————————
  "
     show_status s-ui
-    echo && read -p "Please enter your selection [0-21]: " num
+    echo && read -p "Please enter your selection [0-22]: " num
 
     case "${num}" in
     0)
@@ -912,10 +943,13 @@ show_menu() {
         ssl_cert_issue_CF
         ;;
     21)
+        check_install && create_api_token
+        ;;
+    22)
         update_shell
         ;;
     *)
-        LOGE "Please enter the correct number [0-21]"
+        LOGE "Please enter the correct number [0-22]"
         ;;
     esac
 }

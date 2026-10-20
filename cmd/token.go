@@ -12,7 +12,11 @@ import (
 // genToken prints an APIv2 token for the first admin to stdout (errors go to
 // stderr, so install scripts can capture the token). By default it reuses an
 // existing token if there is one; forceNew always creates a fresh one.
-func genToken(desc string, forceNew bool) {
+func genToken(desc string, forceNew bool, expiryDays int64) {
+	if expiryDays < 0 {
+		fmt.Fprintln(os.Stderr, "token validity cannot be negative")
+		return
+	}
 	if err := database.InitDB(config.GetDBPath()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
@@ -28,9 +32,13 @@ func genToken(desc string, forceNew bool) {
 	}
 	var token string
 	if forceNew {
-		token, err = userService.AddToken(user.Username, 0, desc)
+		token, err = userService.AddToken(user.Username, expiryDays, desc)
 	} else {
-		token, err = userService.GetOrCreateToken(user.Username, desc)
+		if expiryDays > 0 {
+			token, err = userService.AddToken(user.Username, expiryDays, desc)
+		} else {
+			token, err = userService.GetOrCreateToken(user.Username, desc)
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "generate token failed:", err)

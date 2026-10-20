@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/gob"
+	"net/http"
 
 	"github.com/alireza0/s-ui/database/model"
 
@@ -19,8 +20,10 @@ func init() {
 
 func SetLoginUser(c *gin.Context, userName string, maxAge int) error {
 	options := sessions.Options{
-		Path:   "/",
-		Secure: false,
+		Path:     "/",
+		Secure:   c.Request.TLS != nil,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
 	}
 	if maxAge > 0 {
 		options.MaxAge = maxAge * 60
@@ -36,7 +39,10 @@ func SetLoginUser(c *gin.Context, userName string, maxAge int) error {
 func SetMaxAge(c *gin.Context) error {
 	s := sessions.Default(c)
 	s.Options(sessions.Options{
-		Path: "/",
+		Path:     "/",
+		Secure:   c.Request.TLS != nil,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
 	})
 	return s.Save()
 }
@@ -62,8 +68,11 @@ func ClearSession(c *gin.Context) {
 	s := sessions.Default(c)
 	s.Clear()
 	s.Options(sessions.Options{
-		Path:   "/",
-		MaxAge: -1,
+		Path:     "/",
+		MaxAge:   -1,
+		Secure:   c.Request.TLS != nil,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
 	})
 	s.Save()
 }
