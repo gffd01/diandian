@@ -51,8 +51,8 @@ const (
 	// 脚本里只有在 /usr/local/s-ui/db/s-ui.db 不存在时才生成随机账号密码和端口,
 	// 已装过的机器走的是「保留现有设置」那条路 —— 否则 Web 点一下更新就会
 	// 把管理员锁在面板外面。
-	panelUpdaterURL      = "https://raw.githubusercontent.com/Teminuosi/s-ui/main/install.sh"
-	panelReleaseAPI      = "https://api.github.com/repos/Teminuosi/s-ui/releases/latest"
+	panelReleaseAPI      = "https://api.github.com/repos/gffd01/diandian/releases/latest"
+	localPanelUpdater    = "/usr/local/s-ui/install.sh"
 	maxPanelUpdaterBytes = 2 << 20
 )
 
@@ -126,15 +126,11 @@ func (s *PanelService) StartUpdate() error {
 }
 
 func downloadPanelUpdater() (string, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(panelUpdaterURL)
+	source, err := os.Open(localPanelUpdater)
 	if err != nil {
-		return "", fmt.Errorf("download panel updater: %w", err)
+		return "", fmt.Errorf("local verified updater is missing; reinstall from a trusted release: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download panel updater: unexpected HTTP %d", resp.StatusCode)
-	}
+	defer source.Close()
 
 	file, err := os.CreateTemp("", "s-ui-update-*.sh")
 	if err != nil {
@@ -149,7 +145,7 @@ func downloadPanelUpdater() (string, error) {
 		}
 	}()
 
-	n, err := io.Copy(file, io.LimitReader(resp.Body, maxPanelUpdaterBytes+1))
+	n, err := io.Copy(file, io.LimitReader(source, maxPanelUpdaterBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("write panel updater: %w", err)
 	}

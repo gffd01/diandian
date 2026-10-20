@@ -31,7 +31,7 @@ func resetSetting() {
 	}
 }
 
-func updateSetting(port int, path string, subPort int, subPath string) {
+func updateSetting(listen string, port int, path string, subListen string, subPort int, subPath string) {
 	err := database.InitDB(config.GetDBPath())
 	if err != nil {
 		fmt.Println(err)
@@ -39,6 +39,12 @@ func updateSetting(port int, path string, subPort int, subPath string) {
 	}
 
 	settingService := service.SettingService{}
+	if listen != "" {
+		err := settingService.SetListen(listen)
+		if err != nil {
+			fmt.Println("set panel listen address failed:", err)
+		}
+	}
 
 	if port > 0 {
 		err := settingService.SetPort(port)
@@ -62,6 +68,12 @@ func updateSetting(port int, path string, subPort int, subPath string) {
 			fmt.Println("set sub port failed:", err)
 		} else {
 			fmt.Println("set sub port success")
+		}
+	}
+	if subListen != "" {
+		err := settingService.SetSubListen(subListen)
+		if err != nil {
+			fmt.Println("set subscription listen address failed:", err)
 		}
 	}
 	if subPath != "" {

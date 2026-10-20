@@ -9,6 +9,14 @@ WorkingDirectory=/usr/local/s-ui/
 ExecStart=/usr/local/s-ui/sui
 Restart=on-failure
 RestartSec=10s
+LimitNOFILE=1048576
+UMask=0077
+Environment=SUI_LOG_LEVEL=warn
+NoNewPrivileges=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target

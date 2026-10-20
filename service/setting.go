@@ -179,6 +179,10 @@ func (s *SettingService) GetListen() (string, error) {
 	return s.getString("webListen")
 }
 
+func (s *SettingService) SetListen(listen string) error {
+	return s.setString("webListen", listen)
+}
+
 func (s *SettingService) GetWebDomain() (string, error) {
 	return s.getString("webDomain")
 }
@@ -261,6 +265,10 @@ func (s *SettingService) GetTimeLocation() (*time.Location, error) {
 
 func (s *SettingService) GetSubListen() (string, error) {
 	return s.getString("subListen")
+}
+
+func (s *SettingService) SetSubListen(listen string) error {
+	return s.setString("subListen", listen)
 }
 
 func (s *SettingService) GetSubPort() (int, error) {

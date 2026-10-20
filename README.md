@@ -16,20 +16,28 @@
 
 ## 一键安装
 
-支持 Debian、Ubuntu 等采用 systemd 的 Linux 系统。请使用 root 用户执行：
+支持 Debian、Ubuntu 等采用 systemd 的 Linux 系统。推荐先下载源码、检查安装脚本，再执行，
+不要把网上脚本直接交给 root：
 
 ```bash
-SUI_AUTO=1 bash <(curl -fsSL https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)
+git clone --depth=1 https://github.com/gffd01/diandian.git
+cd diandian
+less install.sh
+sudo ./install.sh
 ```
 
-命令会自动识别服务器架构、下载本仓库最新稳定 Release、安装或升级 S-UI，并沿用上游的
-自动生成账号、面板路径、端口、API Token、开放防火墙和启动服务逻辑。
+命令会自动识别服务器架构，下载并校验本仓库最新稳定 Release，然后安装或升级 S-UI。
+新装时会生成随机账号、密码、面板路径和空闲端口。面板默认只监听本机，API Token 默认不创建，
+防火墙默认不修改。
 
 如需恢复上游交互式安装方式：
 
 ```bash
-SUI_AUTO=0 bash <(curl -fsSL https://raw.githubusercontent.com/gffd01/diandian/main/install.sh)
+SUI_AUTO=0 sudo ./install.sh
 ```
+
+公网面板、香港中转集中管理、限时 API Token、防火墙和网络优化说明见
+[安全部署说明](SECURE_INSTALL.md)。
 
 ## 源码构建
 
