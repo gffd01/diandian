@@ -6,11 +6,6 @@
 保留 Teminuosi 版本的面板、节点、中转、服务器管理、多节点、API、安装、升级和
 `SUI_AUTO=1` 自动配置逻辑，仅从前端源码删除以下推广入口：
 
-- 官网/博客链接
-- YouTube 频道链接
-- VPS/机器推荐链接
-- 作者推广入口及对应文案
-
 具体上游提交记录在 [`.upstream-versions`](.upstream-versions) 中。前端已作为普通源码放在
 `frontend/`，不再依赖单独的 Git 子模块。
 
