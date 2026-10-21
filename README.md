@@ -24,10 +24,17 @@ Debian、Ubuntu、CentOS、Rocky Linux、AlmaLinux、Fedora、Arch Linux 和 ope
 
 ## 一键安装
 
-第一版 `universal-*` Release 正在由 GitHub Actions 生成。发布完成后，本节会固定到确切的
-Release 标签和 `install.sh` SHA-256；不会让用户执行一个没有固定校验值的在线脚本。
+请用 `root` 用户复制整行执行：
 
-需要现在审查源码，可先克隆新分支：
+```bash
+curl --fail --location --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/gffd01/diandian/fb196079d909f448b19beb77113d5b5835a0c0fd/install.sh -o /tmp/s-ui-universal-install.sh && echo '74aaac0f8ee2d9c71c4bf7ef174948b3268f9061fcff644a980cce417e14ad4d  /tmp/s-ui-universal-install.sh' | sha256sum --check - && chmod 700 /tmp/s-ui-universal-install.sh && SUI_AUTO=1 /tmp/s-ui-universal-install.sh universal-18
+```
+
+这条命令同时固定了安装脚本提交、脚本 SHA-256 和 Release 标签。只有出现
+`/tmp/s-ui-universal-install.sh: OK` 才会继续安装。`universal-18` 的 7 种架构均已完成
+GitHub Actions 构建，发布包也包含独立的 `SHA256SUMS`。
+
+需要先审查源码，可克隆新分支：
 
 ```bash
 git clone --depth=1 --branch universal-installer-v2 --single-branch https://github.com/gffd01/diandian.git
