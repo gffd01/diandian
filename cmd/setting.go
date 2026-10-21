@@ -166,7 +166,10 @@ func getPublicIP() string {
 
 	for res := range ch {
 		if res.err == nil && res.ip != "" {
-			return strings.TrimSpace(res.ip)
+			candidate := strings.TrimSpace(res.ip)
+			if net.ParseIP(candidate) != nil {
+				return candidate
+			}
 		}
 	}
 	return ""
@@ -203,7 +206,9 @@ func getPanelURI() {
 		fmt.Println(Proto + Domain + PortText + BasePath)
 		return
 	}
-	if len(Listen) > 0 {
+	// Wildcard addresses mean "all interfaces" and are not usable browser
+	// destinations. Fall through so the CLI prints real local/public addresses.
+	if len(Listen) > 0 && Listen != "0.0.0.0" && Listen != "::" && Listen != "[::]" {
 		fmt.Println(Proto + Listen + PortText + BasePath)
 		return
 	}

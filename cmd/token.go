@@ -34,11 +34,7 @@ func genToken(desc string, forceNew bool, expiryDays int64) {
 	if forceNew {
 		token, err = userService.AddToken(user.Username, expiryDays, desc)
 	} else {
-		if expiryDays > 0 {
-			token, err = userService.AddToken(user.Username, expiryDays, desc)
-		} else {
-			token, err = userService.GetOrCreateToken(user.Username, desc)
-		}
+		token, err = userService.GetOrCreateToken(user.Username, desc, expiryDays)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "generate token failed:", err)

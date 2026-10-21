@@ -1,4 +1,4 @@
-name: Build and publish clean S-UI
+name: Build and publish universal S-UI
 
 permissions:
   contents: write
@@ -8,12 +8,13 @@ on:
   push:
     branches:
       - main
+      - universal-installer-v2
     paths-ignore:
       - README.md
       - .upstream-versions
 
 concurrency:
-  group: clean-s-ui-release
+  group: universal-s-ui-release
   cancel-in-progress: true
 
 env:
@@ -23,7 +24,34 @@ env:
   BOOTLIN_BASE_URL: https://toolchains.bootlin.com/downloads/releases/toolchains
 
 jobs:
+  quality-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6.0.2
+
+      - name: Validate installer and service scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n install.sh
+          bash -n s-ui.sh
+          if grep -niE '香港|英国|中转|回源|evoxt|hong[ -]?kong|96\.126\.179\.140|193\.247\.144\.190' install.sh s-ui.sh; then
+            echo "Provider, country or topology-specific logic was found in the universal installer" >&2
+            exit 1
+          fi
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: Run security and service tests
+        run: go test ./api ./service
+
   build-frontend:
+    needs: quality-checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
@@ -202,7 +230,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: clean-${{ github.run_number }}
+      RELEASE_TAG: universal-${{ github.run_number }}
     steps:
       - name: Download all release archives
         uses: actions/download-artifact@v8
@@ -230,7 +258,7 @@ jobs:
             gh release create "$RELEASE_TAG" ./*.tar.gz ./SHA256SUMS \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "S-UI Clean ${RELEASE_TAG}" \
-              --notes "Clean source build from commit ${GITHUB_SHA}. Includes verified release checksums, safer installer and update flow, localhost-only panel defaults, opt-in API/firewall access, and conservative network tuning." \
+              --title "S-UI Universal ${RELEASE_TAG}" \
+              --notes "Universal source build from commit ${GITHUB_SHA}. No country, provider, relay or destination role is hard-coded. Includes verified release checksums, random visible credentials, live login verification, minimal firewall rules, self-healing service settings and memory-aware network tuning." \
               --latest
           fi

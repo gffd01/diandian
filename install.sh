@@ -9,24 +9,44 @@ plain='\033[0m'
 
 cur_dir=$(pwd)
 
-# Full-auto is the DEFAULT install mode: every command runs start-to-finish with
-# no prompts. On a fresh install it generates random admin credentials + a random
-# panel path + free ports. The panel listens on localhost, API access is disabled,
-# and the firewall is left unchanged unless explicitly enabled. On an upgrade it
-# keeps existing settings untouched. To get the old interactive flow back, set
-# SUI_AUTO=0 (or n). Examples after reviewing this file:
+# Full-auto is the DEFAULT install mode. It works the same on any supported VPS;
+# no country, provider, relay or destination role is hard-coded. Every automatic
+# install/upgrade generates a new random admin username and password and verifies
+# those exact credentials against the live login API before reporting success.
+# The default direct mode makes the panel reachable without an SSH tunnel.
+# Set SUI_ACCESS_MODE=tunnel to bind the panel to localhost instead.
 #   sudo ./install.sh             # auto (default)
 #   SUI_AUTO=0 sudo ./install.sh  # interactive
 SUI_AUTO="${SUI_AUTO:-1}"
 SUI_REPO="${SUI_REPO:-gffd01/diandian}"
-SUI_ENABLE_API_TOKEN="${SUI_ENABLE_API_TOKEN:-0}"
+SUI_ACCESS_MODE="${SUI_ACCESS_MODE:-direct}"
 SUI_API_TOKEN_DAYS="${SUI_API_TOKEN_DAYS:-30}"
-SUI_OPEN_FIREWALL="${SUI_OPEN_FIREWALL:-0}"
 SUI_NODE_PORTS="${SUI_NODE_PORTS:-}"
 SUI_ENABLE_TUNING="${SUI_ENABLE_TUNING:-1}"
-SUI_PANEL_LISTEN="${SUI_PANEL_LISTEN:-127.0.0.1}"
+SUI_RUN_DIAGNOSTICS="${SUI_RUN_DIAGNOSTICS:-1}"
 SUI_SUB_LISTEN="${SUI_SUB_LISTEN:-0.0.0.0}"
 install_tmp_dir=""
+INSTALL_ADMIN_USER=""
+INSTALL_ADMIN_PASS=""
+INSTALL_PANEL_PORT=""
+INSTALL_PANEL_PATH=""
+
+case "$SUI_ACCESS_MODE" in
+direct)
+    SUI_PANEL_LISTEN="${SUI_PANEL_LISTEN:-0.0.0.0}"
+    SUI_OPEN_FIREWALL="${SUI_OPEN_FIREWALL:-1}"
+    SUI_ENABLE_API_TOKEN="${SUI_ENABLE_API_TOKEN:-1}"
+    ;;
+tunnel)
+    SUI_PANEL_LISTEN="${SUI_PANEL_LISTEN:-127.0.0.1}"
+    SUI_OPEN_FIREWALL="${SUI_OPEN_FIREWALL:-0}"
+    SUI_ENABLE_API_TOKEN="${SUI_ENABLE_API_TOKEN:-0}"
+    ;;
+*)
+    echo -e "${red}Invalid SUI_ACCESS_MODE: ${SUI_ACCESS_MODE}. Use direct or tunnel.${plain}" >&2
+    exit 1
+    ;;
+esac
 
 cleanup_install_tmp() {
     if [[ -n "$install_tmp_dir" && "$install_tmp_dir" == /tmp/s-ui-install.* ]]; then
@@ -55,7 +75,12 @@ auto_read() {
 # Alphanumeric random string (URL-safe, no base64 specials).
 gen_random_string() {
     local length="$1"
-    { LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom 2>/dev/null | head -c "$length"; } || true
+    local value="" chunk=""
+    while (( ${#value} < length )); do
+        chunk=$({ LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom 2>/dev/null | head -c "$length"; } || true)
+        value="${value}${chunk}"
+    done
+    printf '%s' "${value:0:length}"
 }
 
 # Is a TCP port currently being listened on? (used to avoid clashing with an
@@ -199,85 +224,119 @@ install_base() {
     esac
 }
 
-# Conservative host tuning for high connection counts. It does not promise a
-# faster route; it only removes avoidable server-side queue/file-descriptor
-# bottlenecks. A separate sysctl file makes the change easy to audit or remove.
+# Conservative, memory-aware host tuning. This removes avoidable host-side
+# bottlenecks without pretending that kernel settings can repair a poor route.
+# It deliberately avoids fixed huge socket buffers that can hurt small VPSes.
 apply_network_tuning() {
     [[ "$SUI_ENABLE_TUNING" == "1" ]] || return 0
 
-    cat > /etc/sysctl.d/99-s-ui-network.conf <<'EOF'
-fs.file-max = 1048576
-net.core.somaxconn = 8192
-net.core.netdev_max_backlog = 16384
+    local mem_kb file_max somaxconn backlog syn_backlog
+    mem_kb=$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    if (( mem_kb > 0 && mem_kb < 1048576 )); then
+        file_max=524288
+        somaxconn=4096
+        backlog=8192
+        syn_backlog=4096
+    elif (( mem_kb > 0 && mem_kb < 4194304 )); then
+        file_max=1048576
+        somaxconn=8192
+        backlog=16384
+        syn_backlog=8192
+    else
+        file_max=2097152
+        somaxconn=16384
+        backlog=32768
+        syn_backlog=16384
+    fi
+
+    {
+        printf 'fs.file-max = %s\n' "$file_max"
+        printf 'net.core.somaxconn = %s\n' "$somaxconn"
+        printf 'net.core.netdev_max_backlog = %s\n' "$backlog"
+        printf 'net.ipv4.tcp_max_syn_backlog = %s\n' "$syn_backlog"
+        cat <<'EOF'
 net.ipv4.ip_local_port_range = 10240 65535
-net.ipv4.tcp_max_syn_backlog = 8192
 net.ipv4.tcp_keepalive_time = 300
 net.ipv4.tcp_keepalive_intvl = 30
 net.ipv4.tcp_keepalive_probes = 5
+net.ipv4.tcp_mtu_probing = 1
 EOF
+    } > /etc/sysctl.d/99-s-ui-network.conf
 
-    if modprobe tcp_bbr >/dev/null 2>&1 \
-        && sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr; then
+    modprobe tcp_bbr >/dev/null 2>&1 || true
+    if sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr; then
         cat >> /etc/sysctl.d/99-s-ui-network.conf <<'EOF'
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 EOF
     fi
 
-    sysctl --system >/dev/null 2>&1 || true
+    if sysctl --system >/dev/null 2>&1; then
+        echo -e "${green}[tuning] Applied memory-aware TCP and connection settings.${plain}"
+    else
+        echo -e "${yellow}[tuning] Some kernel settings were unavailable; installation will continue with supported values.${plain}"
+    fi
 }
 
 config_after_install() {
+    local had_existing_db=0
+    [[ -f "/usr/local/s-ui/db/s-ui.db" ]] && had_existing_db=1
     echo -e "${yellow}Migration... ${plain}"
     /usr/local/s-ui/sui migrate
 
-    # Full-auto mode: no prompts. Fresh install -> random credentials + random
-    # panel path; upgrade -> keep existing settings untouched.
+    # Full-auto mode always rotates credentials and prints the new plaintext
+    # values in FinalShell. Existing nodes/database, paths and ports are preserved
+    # on upgrade; only credentials and the selected listen mode are refreshed.
     if is_auto; then
-        if [[ ! -f "/usr/local/s-ui/db/s-ui.db" ]]; then
-            local config_account=$(gen_random_string 10)
-            local config_password=$(gen_random_string 12)
-            local config_path=$(gen_random_string 15)
+        INSTALL_ADMIN_USER="sui$(gen_random_string 10)"
+        INSTALL_ADMIN_PASS=$(gen_random_string 20)
+        local config_token=""
+
+        if (( had_existing_db == 0 )); then
+            local config_path
+            config_path=$(gen_random_string 15)
             # Pick free ports so we don't clash with an existing panel (e.g. a
             # 3x-ui install already on 2096). Keep the defaults when they're free.
-            local config_port=$(pick_port 2095)
-            local config_subPort=$(pick_port 2096)
+            local config_port config_subPort
+            config_port=$(pick_port 2095)
+            config_subPort=$(pick_port 2096)
             echo -e "${yellow}[auto] Fresh install: generating random credentials, panel path and free ports...${plain}"
             [[ "$config_port" != "2095" ]] && echo -e "${yellow}[auto] Port 2095 busy, using ${config_port} for the panel.${plain}"
             [[ "$config_subPort" != "2096" ]] && echo -e "${yellow}[auto] Port 2096 busy, using ${config_subPort} for subscriptions.${plain}"
             /usr/local/s-ui/sui setting -listen "${SUI_PANEL_LISTEN}" -port "${config_port}" -path "/${config_path}/" \
                 -subListen "${SUI_SUB_LISTEN}" -subPort "${config_subPort}"
-            /usr/local/s-ui/sui admin -username "${config_account}" -password "${config_password}"
-            # APIv2 is full remote administration, not a read-only monitor.
-            # Keep it disabled unless the operator explicitly opts in.
-            local config_token=""
-            if [[ "$SUI_ENABLE_API_TOKEN" == "1" ]]; then
-                config_token=$(/usr/local/s-ui/sui token -desc install -days "$SUI_API_TOKEN_DAYS" 2>/dev/null || true)
-            fi
-            echo -e "###############################################"
-            echo -e "${green}username:${config_account}${plain}"
-            echo -e "${green}password:${config_password}${plain}"
-            echo -e "${green}panel port:${config_port}${plain}"
-            echo -e "${green}panel path:/${config_path}/${plain}"
-            echo -e "${green}sub port:${config_subPort}${plain}"
-            if [[ "$SUI_PANEL_LISTEN" == "127.0.0.1" || "$SUI_PANEL_LISTEN" == "::1" ]]; then
-                echo -e "${yellow}panel access: localhost only (secure default). Use an SSH tunnel or configure HTTPS before public access.${plain}"
-            fi
-            if [[ -n "$config_token" ]]; then
-                echo -e "${green}API token (copy the line below):${plain}"
-                echo -e "${config_token}"
-            fi
-            echo -e "###############################################"
-            echo -e "${red}If you forget your login info, type ${green}s-ui${red} on the server for the menu.${plain}"
         else
-            echo -e "${yellow}[auto] Upgrade detected: keeping existing settings.${plain}"
+            echo -e "${yellow}[auto] Upgrade detected: preserving nodes, database, paths and ports; rotating admin credentials.${plain}"
             # Guard against a port clash with another panel on the same box.
             resolve_port_clash
-            echo -e "###############################################"
-            /usr/local/s-ui/sui admin -show 2>/dev/null
-            echo -e "${red}If you forget your login info, type ${green}s-ui${red} on the server for the menu.${plain}"
-            echo -e "###############################################"
+            /usr/local/s-ui/sui setting -listen "${SUI_PANEL_LISTEN}" -subListen "${SUI_SUB_LISTEN}"
         fi
+
+        /usr/local/s-ui/sui admin -username "${INSTALL_ADMIN_USER}" -password "${INSTALL_ADMIN_PASS}" >/dev/null
+
+        local current_settings
+        current_settings=$(/usr/local/s-ui/sui setting -show 2>/dev/null)
+        INSTALL_PANEL_PORT=$(printf '%s\n' "$current_settings" | sed -n 's/.*Panel port:[[:space:]]*//p' | head -1)
+        INSTALL_PANEL_PATH=$(printf '%s\n' "$current_settings" | sed -n 's/.*Panel path:[[:space:]]*//p' | head -1)
+        local current_sub_port
+        current_sub_port=$(printf '%s\n' "$current_settings" | sed -n 's/.*Sub port:[[:space:]]*//p' | head -1)
+
+        if [[ "$SUI_ENABLE_API_TOKEN" == "1" ]]; then
+            config_token=$(/usr/local/s-ui/sui token -desc install -days "$SUI_API_TOKEN_DAYS" 2>/dev/null || true)
+        fi
+
+        echo -e "###############################################################"
+        echo -e "${green}NEW ADMIN USERNAME: ${INSTALL_ADMIN_USER}${plain}"
+        echo -e "${green}NEW ADMIN PASSWORD: ${INSTALL_ADMIN_PASS}${plain}"
+        echo -e "${green}PANEL PORT: ${INSTALL_PANEL_PORT}${plain}"
+        echo -e "${green}PANEL PATH: ${INSTALL_PANEL_PATH}${plain}"
+        echo -e "${green}SUBSCRIPTION PORT: ${current_sub_port}${plain}"
+        echo -e "${green}ACCESS MODE: ${SUI_ACCESS_MODE}${plain}"
+        if [[ -n "$config_token" ]]; then
+            echo -e "${green}API TOKEN (${SUI_API_TOKEN_DAYS} days): ${config_token}${plain}"
+        fi
+        echo -e "${yellow}Save these credentials now. A later automatic upgrade will rotate them again.${plain}"
+        echo -e "###############################################################"
         return
     fi
 
@@ -385,6 +444,90 @@ open_firewall() {
         firewall-cmd --reload > /dev/null 2>&1
         echo -e "${green}[secure] Firewall opened only for the panel, subscription and explicitly supplied node ports.${plain}"
     fi
+}
+
+# Do not claim success merely because systemd accepted the process. This check
+# waits for the panel, opens the login page locally, submits the exact generated
+# credentials, and confirms the authenticated panel can be loaded. It is fully
+# local and works regardless of country, provider, public IP or server role.
+verify_panel_login() {
+    if ! systemctl is-active --quiet s-ui; then
+        echo -e "${red}[verify] s-ui service is not active.${plain}"
+        systemctl status s-ui --no-pager -l || true
+        journalctl -u s-ui -n 60 --no-pager || true
+        return 1
+    fi
+
+    local settings panel_port panel_path auth_file cookie_file response page_code panel_code
+    local scheme base_url login_url attempt
+    settings=$(/usr/local/s-ui/sui setting -show 2>/dev/null)
+    panel_port=$(printf '%s\n' "$settings" | sed -n 's/.*Panel port:[[:space:]]*//p' | head -1)
+    panel_path=$(printf '%s\n' "$settings" | sed -n 's/.*Panel path:[[:space:]]*//p' | head -1)
+    [[ "$panel_port" =~ ^[0-9]{1,5}$ ]] || {
+        echo -e "${red}[verify] Could not read a valid panel port.${plain}"
+        return 1
+    }
+    [[ -n "$panel_path" ]] || panel_path="/"
+    [[ "$panel_path" == /* ]] || panel_path="/${panel_path}"
+    [[ "$panel_path" == */ ]] || panel_path="${panel_path}/"
+
+    if is_auto && [[ -z "$INSTALL_ADMIN_USER" || -z "$INSTALL_ADMIN_PASS" ]]; then
+        echo -e "${red}[verify] Generated credentials are missing; refusing to report success.${plain}"
+        return 1
+    fi
+
+    auth_file=$(mktemp /tmp/s-ui-auth.XXXXXX)
+    cookie_file=$(mktemp /tmp/s-ui-cookie.XXXXXX)
+    chmod 0600 "$auth_file" "$cookie_file"
+    printf '%s' "$INSTALL_ADMIN_PASS" > "$auth_file"
+
+    for attempt in $(seq 1 20); do
+        for scheme in http https; do
+            base_url="${scheme}://127.0.0.1:${panel_port}${panel_path}"
+            login_url="${base_url}api/login"
+            page_code=$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+                --connect-timeout 2 --max-time 5 "${base_url}login" 2>/dev/null || true)
+            [[ "$page_code" =~ ^[23][0-9][0-9]$ ]] || continue
+
+            if is_auto; then
+                response=$(curl --insecure --silent --show-error --cookie-jar "$cookie_file" \
+                    --connect-timeout 2 --max-time 5 \
+                    --data-urlencode "user=${INSTALL_ADMIN_USER}" \
+                    --data-urlencode "pass@${auth_file}" \
+                    "$login_url" 2>/dev/null || true)
+                printf '%s' "$response" | grep -Eq '"success"[[:space:]]*:[[:space:]]*true' || continue
+                panel_code=$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+                    --cookie "$cookie_file" --connect-timeout 2 --max-time 5 "$base_url" 2>/dev/null || true)
+                [[ "$panel_code" =~ ^[23][0-9][0-9]$ ]] || continue
+            fi
+
+            rm -f "$auth_file" "$cookie_file"
+            echo -e "${green}[verify] Login page, generated credentials and authenticated panel all passed.${plain}"
+            echo -e "${green}[verify] Local panel check: ${base_url}${plain}"
+            return 0
+        done
+        sleep 1
+    done
+
+    rm -f "$auth_file" "$cookie_file"
+    echo -e "${red}[verify] Panel or generated credentials failed verification. Installation is NOT marked successful.${plain}"
+    systemctl status s-ui --no-pager -l || true
+    journalctl -u s-ui -n 60 --no-pager || true
+    return 1
+}
+
+post_install_diagnostics() {
+    [[ "$SUI_RUN_DIAGNOSTICS" == "1" ]] || return 0
+    local congestion qdisc memory load root_free mtu
+    congestion=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)
+    qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown)
+    memory=$(free -h 2>/dev/null | awk '/^Mem:/ {print $3 "/" $2}' || true)
+    load=$(awk '{print $1 "," $2 "," $3}' /proc/loadavg 2>/dev/null || true)
+    root_free=$(df -h / 2>/dev/null | awk 'NR==2 {print $4}' || true)
+    mtu=$(ip -o link show 2>/dev/null | awk '$2 != "lo:" {for (i=1;i<=NF;i++) if ($i=="mtu") {print $(i+1); exit}}' || true)
+    echo -e "${green}[diagnostics] service=active congestion=${congestion} qdisc=${qdisc} mtu=${mtu:-unknown}${plain}"
+    echo -e "${green}[diagnostics] memory=${memory:-unknown} load=${load:-unknown} root_free=${root_free:-unknown}${plain}"
+    echo -e "${yellow}[diagnostics] These confirm host readiness; route bandwidth and packet loss depend on the provider and path.${plain}"
 }
 
 prepare_services() {
@@ -500,6 +643,8 @@ install_s-ui() {
     prepare_services
 
     systemctl enable s-ui --now
+    verify_panel_login
+    post_install_diagnostics
 
     echo -e "${green}s-ui ${last_version}${plain} installation finished, it is up and running now..."
     echo -e "You may access the Panel with following URL(s):${green}"

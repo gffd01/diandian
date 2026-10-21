@@ -186,17 +186,33 @@ func (s *UserService) DeleteToken(id string) error {
 	return db.Model(model.Tokens{}).Where("id = ?", id).Delete(&model.Tokens{}).Error
 }
 
-// GetOrCreateToken returns an existing non-expired token if there is one, else
-// creates a new one. Used so install/upgrade can print a stable token without
-// piling up new ones on every run.
-func (s *UserService) GetOrCreateToken(username string, desc string) (string, error) {
+// GetOrCreateToken returns a non-expired token belonging to the requested user
+// and purpose, or creates one. Restricting both fields prevents an installer
+// from accidentally printing another administrator's token and avoids piling up
+// duplicate tokens on every upgrade.
+func (s *UserService) GetOrCreateToken(username string, desc string, expiryDays int64) (string, error) {
 	db := database.GetDB()
+	var userID uint
+	if err := db.Model(model.User{}).Where("username = ?", username).Select("id").Scan(&userID).Error; err != nil {
+		return "", err
+	}
+	if userID == 0 {
+		return "", common.NewError("user not found")
+	}
+
 	var existing model.Tokens
-	err := db.Model(model.Tokens{}).
-		Where("(expiry == 0 or expiry > ?)", time.Now().Unix()).
-		First(&existing).Error
+	query := db.Model(model.Tokens{}).Where("user_id = ? AND desc = ?", userID, desc)
+	if expiryDays > 0 {
+		query = query.Where("expiry > ?", time.Now().Unix())
+	} else {
+		query = query.Where("expiry = 0")
+	}
+	err := query.Order("id DESC").First(&existing).Error
 	if err == nil && existing.Token != "" {
 		return existing.Token, nil
 	}
-	return s.AddToken(username, 0, desc)
+	if err != nil && !database.IsNotFound(err) {
+		return "", err
+	}
+	return s.AddToken(username, expiryDays, desc)
 }
