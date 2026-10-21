@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -12,7 +13,7 @@ import (
 	"github.com/alireza0/s-ui/database"
 	"github.com/alireza0/s-ui/service"
 
-	"github.com/shirou/gopsutil/v4/net"
+	gopsutilnet "github.com/shirou/gopsutil/v4/net"
 )
 
 func resetSetting() {
@@ -213,7 +214,7 @@ func getPanelURI() {
 		return
 	}
 	fmt.Println("Local address:")
-	netInterfaces, _ := net.Interfaces()
+	netInterfaces, _ := gopsutilnet.Interfaces()
 	for i := 0; i < len(netInterfaces); i++ {
 		if len(netInterfaces[i].Flags) > 2 && netInterfaces[i].Flags[0] == "up" && netInterfaces[i].Flags[1] != "loopback" {
 			addrs := netInterfaces[i].Addrs
