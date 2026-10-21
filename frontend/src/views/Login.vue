@@ -9,6 +9,13 @@
               <v-form @submit.prevent="login" ref="form">
                 <v-text-field v-model="username" :label="$t('login.username')" :rules="usernameRules" required></v-text-field>
                 <v-text-field v-model="password" :label="$t('login.password')" :rules="passwordRules" type="password" required></v-text-field>
+                <v-alert
+                  v-if="loginError"
+                  type="error"
+                  variant="tonal"
+                  density="compact"
+                  class="mb-2"
+                >{{ loginError }}</v-alert>
                 <v-btn :loading="loading" type="submit" color="primary" block class="mt-2" v-text="$t('actions.submit')"></v-btn>
               </v-form>
               <v-select
@@ -54,7 +61,6 @@
 import { ref } from "vue"
 import { useLocale,useTheme } from 'vuetify'
 import { i18n, languages } from '@/locales'
-import { useRouter } from 'vue-router'
 import HttpUtil from '@/plugins/httputil'
 import { SKINS, savedSkin, applySkinAttr, type SkinId } from '@/plugins/skins'
 
@@ -84,19 +90,29 @@ const passwordRules = [
 ]
 
 const loading = ref(false)
-const router = useRouter()
+const loginError = ref('')
 
 const login = async () => {
   if (username.value == '' || password.value == '') return
-  loading.value=true
-  const response = await HttpUtil.post('api/login',{user: username.value, pass: password.value})
-  if(response.success){
-    setTimeout(() => {
-      loading.value=false
-      router.push('/')
-    }, 500)
-  } else {
-    loading.value=false
+  loading.value = true
+  loginError.value = ''
+  try {
+    // A dead panel, firewall drop or wrong base path must not leave the button
+    // spinning forever. HttpUtil turns Axios failures into a normal Msg.
+    const response = await HttpUtil.post(
+      'api/login',
+      { user: username.value, pass: password.value },
+      { timeout: 10000 },
+    )
+    if (response.success) {
+      // A full navigation is more reliable than an in-app route transition
+      // immediately after the server creates the authenticated session.
+      window.location.assign((window as any).BASE_URL || './')
+      return
+    }
+    loginError.value = response.msg || String(i18n.global.t('invalidLogin'))
+  } finally {
+    loading.value = false
   }
 }
 const changeLocale = (l: any) => {

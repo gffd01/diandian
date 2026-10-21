@@ -83,6 +83,20 @@ gen_random_string() {
     printf '%s' "${value:0:length}"
 }
 
+# Random panel paths are copied from a terminal into a browser.  Avoid glyphs
+# that are routinely confused in common terminal/browser fonts (0/O, 1/I/l).
+# This is still a 32-character alphabet, so a 15-character path retains 75
+# bits of entropy while remaining practical to read and type.
+gen_random_path() {
+    local length="$1"
+    local value="" chunk=""
+    while (( ${#value} < length )); do
+        chunk=$({ LC_ALL=C tr -dc 'abcdefghijkmnpqrstuvwxyz23456789' < /dev/urandom 2>/dev/null | head -c "$length"; } || true)
+        value="${value}${chunk}"
+    done
+    printf '%s' "${value:0:length}"
+}
+
 # Is a TCP port currently being listened on? (used to avoid clashing with an
 # existing panel such as 3x-ui, whose default sub port is also 2096.)
 is_port_in_use() {
@@ -294,7 +308,7 @@ config_after_install() {
 
         if (( had_existing_db == 0 )); then
             local config_path
-            config_path=$(gen_random_string 15)
+            config_path=$(gen_random_path 15)
             # Pick free ports so we don't clash with an existing panel (e.g. a
             # 3x-ui install already on 2096). Keep the defaults when they're free.
             local config_port config_subPort
@@ -306,10 +320,22 @@ config_after_install() {
             /usr/local/s-ui/sui setting -listen "${SUI_PANEL_LISTEN}" -port "${config_port}" -path "/${config_path}/" \
                 -subListen "${SUI_SUB_LISTEN}" -subPort "${config_subPort}"
         else
-            echo -e "${yellow}[auto] Upgrade detected: preserving nodes, database, paths and ports; rotating admin credentials.${plain}"
+            echo -e "${yellow}[auto] Upgrade detected: preserving nodes, database and ports; rotating admin credentials.${plain}"
             # Guard against a port clash with another panel on the same box.
             resolve_port_clash
             /usr/local/s-ui/sui setting -listen "${SUI_PANEL_LISTEN}" -subListen "${SUI_SUB_LISTEN}"
+
+            # Older releases generated mixed-case paths containing 0/O/1/I/l.
+            # They are secure but very easy to mistype from FinalShell. Rotate
+            # only those ambiguous paths; already-readable paths stay stable.
+            local existing_settings existing_path replacement_path
+            existing_settings=$(/usr/local/s-ui/sui setting -show 2>/dev/null)
+            existing_path=$(printf '%s\n' "$existing_settings" | sed -n 's/.*Panel path:[[:space:]]*//p' | head -1)
+            if [[ "$existing_path" =~ [01IlO] ]]; then
+                replacement_path=$(gen_random_path 15)
+                /usr/local/s-ui/sui setting -path "/${replacement_path}/"
+                echo -e "${yellow}[auto] Replaced an ambiguous legacy panel path; use the new URL printed below.${plain}"
+            fi
         fi
 
         /usr/local/s-ui/sui admin -username "${INSTALL_ADMIN_USER}" -password "${INSTALL_ADMIN_PASS}" >/dev/null

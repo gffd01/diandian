@@ -36,6 +36,11 @@ jobs:
           set -euo pipefail
           bash -n install.sh
           bash -n s-ui.sh
+          grep -q "abcdefghijkmnpqrstuvwxyz23456789" install.sh
+          if grep -n "config_path=.*gen_random_string" install.sh; then
+            echo "Panel paths must use the unambiguous random alphabet" >&2
+            exit 1
+          fi
           if grep -niE '香港|英国|中转|回源|evoxt|hong[ -]?kong|96\.126\.179\.140|193\.247\.144\.190' install.sh s-ui.sh; then
             echo "Provider, country or topology-specific logic was found in the universal installer" >&2
             exit 1
