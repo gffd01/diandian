@@ -97,6 +97,14 @@ replace_once(
     "",
 )
 
+# Keep Simplified Chinese as the first-run default after each upstream refresh.
+# Existing users who already selected another language are still respected via localStorage.
+replace_once(
+    "frontend/src/locales/index.ts",
+    '  locale: localStorage.getItem("locale") ?? \'en\',\n',
+    '  locale: localStorage.getItem("locale") ?? \'zhHans\',\n',
+)
+
 installer = root / "install.sh"
 install_text = installer.read_text(encoding="utf-8")
 replacements = {
