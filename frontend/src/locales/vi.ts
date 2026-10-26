@@ -407,6 +407,12 @@ export default {
     port: "Cổng Máy chủ",
     addUrlTest: "Thêm URLTest",
     delay: "Độ trễ",
+    speed: "Tốc độ tải xuống",
+    speedHint: "Tải 5 MB để đo thông lượng thực tế",
+    compareHint: "So sánh tốc độ chuyển tiếp và direct",
+    bandwidthHint: "100 Mbps là giá trị ban đầu; hãy nhập băng thông thực tế.",
+    brutalHint: "Băng thông Brutal phải phù hợp với đường truyền thực tế.",
+    tuicHint: "cubic tương thích nhưng không luôn nhanh nhất; hãy đo trước khi đổi.",
   },
   rule: {
     add: "Thêm Quy tắc",

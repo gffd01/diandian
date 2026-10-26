@@ -77,6 +77,23 @@
                 size="small" color="error" icon="mdi-close-circle" class="ms-1" />
             </v-col>
           </v-row>
+          <v-row>
+            <v-col cols="4">{{ $t('out.speed') }}</v-col>
+            <v-col cols="8">
+              <v-progress-circular v-if="speedResults[r.outbound]?.loading" indeterminate size="20" />
+              <v-icon v-else icon="mdi-compare-horizontal" @click="compareRelay(r.outbound)">
+                <v-tooltip activator="parent" location="top" :text="$t('out.compareHint')"></v-tooltip>
+              </v-icon>
+              <v-chip v-if="speedResults[r.outbound]?.success" density="compact" size="small" color="primary" variant="flat" class="ms-1">
+                {{ speedResults[r.outbound].data?.DownloadMbps?.toFixed(1) }} Mbps
+              </v-chip>
+              <v-chip v-if="directTag && speedResults[directTag]?.success" density="compact" size="small" color="secondary" variant="tonal" class="ms-1">
+                direct {{ speedResults[directTag].data?.DownloadMbps?.toFixed(1) }} Mbps
+              </v-chip>
+              <v-icon v-else-if="speedResults[r.outbound] && !speedResults[r.outbound].loading && !speedResults[r.outbound].success"
+                size="small" color="error" icon="mdi-close-circle" class="ms-1" />
+            </v-col>
+          </v-row>
         </v-card-text>
         <v-divider></v-divider>
         <v-card-actions style="padding: 0;">
@@ -119,6 +136,8 @@ const delLoading = ref(false)
 const clearConfirm = ref(false)
 const clearLoading = ref(false)
 const checkResults = ref<Record<string, any>>({})
+const speedResults = ref<Record<string, any>>({})
+const directTag = computed(() => (Data().outbounds || []).find((o: any) => o.type === 'direct')?.tag || '')
 
 // QR for a relay = the QR of the clients on its entry inbound(s) — that's the
 // link end users actually connect with (the relay is transparent to them).
@@ -173,6 +192,21 @@ const checkOutbound = async (tag: string) => {
   const msg = await HttpUtils.get('api/checkOutbound', { tag })
   const success = msg.success && msg.obj?.OK
   checkResults.value = { ...checkResults.value, [tag]: { loading: false, success, data: msg.obj ?? null } }
+}
+
+const checkSpeed = async (tag: string) => {
+  speedResults.value = { ...speedResults.value, [tag]: { loading: true, success: false } }
+  const msg = await HttpUtils.get('api/checkOutbound', { tag, speed: 1, bytes: 5 * 1024 * 1024 })
+  const success = msg.success && msg.obj?.OK
+  speedResults.value = {
+    ...speedResults.value,
+    [tag]: { loading: false, success, data: msg.obj ?? null, errorMessage: success ? undefined : (msg.obj?.Error ?? msg.msg ?? '') }
+  }
+}
+
+const compareRelay = async (tag: string) => {
+  const tags = directTag.value && directTag.value !== tag ? [tag, directTag.value] : [tag]
+  await Promise.all(tags.map(checkSpeed))
 }
 
 const delRelay = async (r: any, index: number) => {

@@ -507,6 +507,12 @@ export default {
     port: "服务器端口",
     addUrlTest: "添加 URLTest",
     delay: "延迟",
+    speed: "下载速度",
+    speedHint: "下载 5MB 测试真实吞吐量",
+    compareHint: "比较中转与 direct 出站速度",
+    bandwidthHint: "100 Mbps 是初始值，不代表服务器真实带宽；请按实际线路填写，否则可能限速或增加丢包。",
+    brutalHint: "Brutal 带宽必须接近真实线路能力，默认 100/100 Mbps 可能限速或导致拥塞。",
+    tuicHint: "cubic 是兼容默认值，不一定是最快选择；请先测速，再比较 bbr 或 new_reno。",
   },
   rule: {
     add: "添加规则",

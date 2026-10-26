@@ -489,6 +489,8 @@ func (a *ApiService) GetSingboxConfig(c *gin.Context) {
 func (a *ApiService) GetCheckOutbound(c *gin.Context) {
 	tag := c.Query("tag")
 	link := c.Query("link")
-	result := a.ConfigService.CheckOutbound(tag, link)
+	speed := c.Query("speed") == "1"
+	maxBytes, _ := strconv.ParseInt(c.Query("bytes"), 10, 64)
+	result := a.ConfigService.CheckOutbound(tag, link, speed, maxBytes)
 	jsonObj(c, result, nil)
 }

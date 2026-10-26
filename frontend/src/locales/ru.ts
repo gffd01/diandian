@@ -408,6 +408,12 @@ export default {
     port: "Порт сервера",
     addUrlTest: "Добавить URLTest",
     delay: "Задержка",
+    speed: "Скорость загрузки",
+    speedHint: "Загрузить 5 МБ для измерения скорости",
+    compareHint: "Сравнить скорость ретрансляции и direct",
+    bandwidthHint: "100 Mbps is an initial value; set the real link capacity.",
+    brutalHint: "Brutal bandwidth must match the real link capacity.",
+    tuicHint: "cubic is compatible but not always fastest; compare after testing.",
   },
   rule: {
     add: "Добавить правило",
