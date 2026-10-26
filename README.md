@@ -27,11 +27,11 @@ Debian、Ubuntu、CentOS、Rocky Linux、AlmaLinux、Fedora、Arch Linux 和 ope
 请用 `root` 用户复制整行执行：
 
 ```bash
-curl --fail --location --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/gffd01/diandian/fb196079d909f448b19beb77113d5b5835a0c0fd/install.sh -o /tmp/s-ui-universal-install.sh && echo '74aaac0f8ee2d9c71c4bf7ef174948b3268f9061fcff644a980cce417e14ad4d  /tmp/s-ui-universal-install.sh' | sha256sum --check - && chmod 700 /tmp/s-ui-universal-install.sh && SUI_AUTO=1 /tmp/s-ui-universal-install.sh universal-18
+curl --fail --location --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/gffd01/diandian/df87b6b7b68c4ce9a33f09ba7a2d68a6dcafe612/install.sh -o /tmp/s-ui-universal-install.sh && echo '82e21170a1e9bc190cc71fc9345712c30cb7f21c422fe2f2678371be876d3d29  /tmp/s-ui-universal-install.sh' | sha256sum --check - && chmod 700 /tmp/s-ui-universal-install.sh && SUI_AUTO=1 /tmp/s-ui-universal-install.sh universal-21
 ```
 
 这条命令同时固定了安装脚本提交、脚本 SHA-256 和 Release 标签。只有出现
-`/tmp/s-ui-universal-install.sh: OK` 才会继续安装。`universal-18` 的 7 种架构均已完成
+`/tmp/s-ui-universal-install.sh: OK` 才会继续安装。`universal-21` 的 7 种架构均已完成
 GitHub Actions 构建，发布包也包含独立的 `SHA256SUMS`。
 
 需要先审查源码，可克隆新分支：
