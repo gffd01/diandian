@@ -23,7 +23,9 @@ func SetLoginUser(c *gin.Context, userName string, maxAge int) error {
 		Path:     "/",
 		Secure:   c.Request.TLS != nil,
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		// Lax keeps the session protected against cross-site subrequests while
+		// allowing the panel to retain its cookie on direct HTTP/IP logins.
+		SameSite: http.SameSiteLaxMode,
 	}
 	if maxAge > 0 {
 		options.MaxAge = maxAge * 60
@@ -42,7 +44,7 @@ func SetMaxAge(c *gin.Context) error {
 		Path:     "/",
 		Secure:   c.Request.TLS != nil,
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 	})
 	return s.Save()
 }
@@ -72,7 +74,7 @@ func ClearSession(c *gin.Context) {
 		MaxAge:   -1,
 		Secure:   c.Request.TLS != nil,
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 	})
 	s.Save()
 }
