@@ -407,6 +407,12 @@ export default {
     port: "伺服器端口",
     addUrlTest: "新增 URLTest",
     delay: "延遲",
+    speed: "下載速度",
+    speedHint: "下載 5MB 測試真實吞吐量",
+    compareHint: "比較中轉與 direct 出站速度",
+    bandwidthHint: "100 Mbps 是初始值，不代表伺服器真實頻寬；請按實際線路填寫。",
+    brutalHint: "Brutal 頻寬必須接近真實線路，預設 100/100 Mbps 可能限速或造成壅塞。",
+    tuicHint: "cubic 是相容預設值，不一定最快；請先測速，再比較 bbr 或 new_reno。",
   },
   rule: {
     add: "添加規則",

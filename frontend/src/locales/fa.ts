@@ -406,7 +406,13 @@ export default {
     addr: "آدرس سرور",
     port: "پورت سرور",
     addUrlTest: "افزودن URLTest",
-    delay: "تأخیر"
+    delay: "تأخیر",
+    speed: "سرعت دانلود",
+    speedHint: "دانلود 5 مگابایت برای سنجش سرعت واقعی",
+    compareHint: "مقایسه سرعت رله و direct",
+    bandwidthHint: "100 Mbps مقدار اولیه است؛ پهنای باند واقعی را وارد کنید.",
+    brutalHint: "پهنای باند Brutal باید با ظرفیت واقعی مسیر هماهنگ باشد.",
+    tuicHint: "cubic سازگار است اما همیشه سریع ترین نیست؛ ابتدا آزمایش کنید."
   },
   rule: {
     add: "ایجاد قانون",

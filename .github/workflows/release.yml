@@ -5,6 +5,9 @@ permissions:
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - universal-installer-v2
   push:
     branches:
       - main
@@ -52,8 +55,8 @@ jobs:
           cache: false
           go-version-file: go.mod
 
-      - name: Run security and service tests
-        run: go test ./api ./service
+      - name: Run security, core and service tests
+        run: go test ./api ./core ./service
 
   build-frontend:
     needs: quality-checks
@@ -231,6 +234,7 @@ jobs:
           retention-days: 7
 
   publish:
+    if: github.event_name != 'pull_request'
     needs: build-linux
     runs-on: ubuntu-latest
     env:

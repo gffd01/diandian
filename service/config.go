@@ -176,12 +176,15 @@ func (s *ConfigService) StopCore() error {
 	return nil
 }
 
-func (s *ConfigService) CheckOutbound(tag string, link string) core.CheckOutboundResult {
+func (s *ConfigService) CheckOutbound(tag string, link string, speed bool, maxBytes int64) core.CheckOutboundResult {
 	if tag == "" {
 		return core.CheckOutboundResult{Error: "missing query parameter: tag"}
 	}
 	if corePtr == nil || !corePtr.IsRunning() {
 		return core.CheckOutboundResult{Error: "core not running"}
+	}
+	if speed {
+		return core.CheckOutboundSpeed(corePtr.GetCtx(), tag, link, maxBytes)
 	}
 	return core.CheckOutbound(corePtr.GetCtx(), tag, link)
 }

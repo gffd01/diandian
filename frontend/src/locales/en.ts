@@ -507,6 +507,12 @@ export default {
     port: "Server Port",
     addUrlTest: "Add URLTest",
     delay: "Delay",
+    speed: "Download speed",
+    speedHint: "Download 5 MB to measure real throughput",
+    compareHint: "Compare relay and direct outbound speed",
+    bandwidthHint: "100 Mbps is an initial value, not measured bandwidth. Set the real link capacity to avoid limiting speed or increasing loss.",
+    brutalHint: "Brutal bandwidth must match the real link. The 100/100 Mbps default may limit speed or cause congestion.",
+    tuicHint: "cubic is a compatible default, not always the fastest. Measure first, then compare bbr or new_reno.",
   },
   rule: {
     add: "Add Rule",

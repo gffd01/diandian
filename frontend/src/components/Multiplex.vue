@@ -53,6 +53,9 @@
       </template>
     </v-row>
     <v-row v-if="mux?.brutal?.enabled">
+      <v-col cols="12" v-if="up_mbps === 100 || down_mbps === 100">
+        <v-alert type="warning" variant="tonal" density="compact">{{ $t('out.brutalHint') }}</v-alert>
+      </v-col>
       <v-col cols="12" sm="6" md="4">
         <v-text-field
         :label="$t('stats.upload')"

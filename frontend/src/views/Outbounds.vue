@@ -111,6 +111,30 @@
               </template>
             </v-col>
           </v-row>
+          <v-row>
+            <v-col>{{ $t('out.speed') }}</v-col>
+            <v-col>
+              <v-progress-circular v-if="speedResults[item.tag]?.loading" indeterminate size="20" />
+              <v-icon v-else icon="mdi-download-network" @click="checkSpeed(item.tag)">
+                <v-tooltip activator="parent" location="top" :text="$t('out.speedHint')"></v-tooltip>
+              </v-icon>
+              <v-chip
+                v-if="speedResults[item.tag]?.success"
+                density="compact"
+                size="small"
+                color="success"
+                variant="flat"
+                class="ms-1"
+              >
+                {{ speedResults[item.tag].data?.DownloadMbps?.toFixed(1) }} Mbps
+              </v-chip>
+              <v-tooltip v-else-if="speedResults[item.tag] && !speedResults[item.tag].loading" location="top" :text="speedResults[item.tag].errorMessage || $t('failed')">
+                <template v-slot:activator="{ props }">
+                  <v-icon v-bind="props" size="small" color="error" icon="mdi-close-circle" class="ms-1" />
+                </template>
+              </v-tooltip>
+            </v-col>
+          </v-row>
         </v-card-text>
         <v-divider></v-divider>
         <v-card-actions style="padding: 0;">
@@ -158,11 +182,12 @@ import { computed, ref } from 'vue'
 interface CheckResult {
   loading?: boolean
   success: boolean
-  data?: { OK?: boolean; Delay?: number; Error?: string } | null
+  data?: { OK?: boolean; Delay?: number; DownloadMbps?: number; Bytes?: number; DurationMs?: number; Error?: string } | null
   errorMessage?: string
 }
 
 const checkResults = ref<Record<string, CheckResult>>({})
+const speedResults = ref<Record<string, CheckResult>>({})
 
 const checkOutbound = async (tag: string) => {
   checkResults.value = { ...checkResults.value, [tag]: { loading: true, success: false } }
@@ -171,6 +196,17 @@ const checkOutbound = async (tag: string) => {
   const errorMessage = success ? undefined : (msg.obj?.Error ?? msg.msg ?? '')
   checkResults.value = {
     ...checkResults.value,
+    [tag]: { loading: false, success, data: msg.obj ?? null, errorMessage }
+  }
+}
+
+const checkSpeed = async (tag: string) => {
+  speedResults.value = { ...speedResults.value, [tag]: { loading: true, success: false } }
+  const msg = await HttpUtils.get('api/checkOutbound', { tag, speed: 1, bytes: 5 * 1024 * 1024 })
+  const success = msg.success && msg.obj?.OK
+  const errorMessage = success ? undefined : (msg.obj?.Error ?? msg.msg ?? '')
+  speedResults.value = {
+    ...speedResults.value,
     [tag]: { loading: false, success, data: msg.obj ?? null, errorMessage }
   }
 }

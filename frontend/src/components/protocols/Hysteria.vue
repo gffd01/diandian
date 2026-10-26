@@ -1,5 +1,8 @@
 <template>
   <v-card subtitle="Hysteria">
+    <v-alert v-if="up_mbps === 100 || down_mbps === 100" type="warning" variant="tonal" density="compact" class="ma-3">
+      {{ $t('out.bandwidthHint') }}
+    </v-alert>
     <v-row>
       <v-col cols="12" sm="6" md="4">
         <v-text-field
