@@ -96,21 +96,12 @@ const router = createRouter({
 const DEFAULT_TITLE = 'S-UI'
 let intervalId:any
 
-// Navigation guard to check authentication state
+// Authentication is verified by the backend when it serves index.html and by
+// every protected API request. The session cookie is HttpOnly on purpose, so
+// browser JavaScript must never try to infer login state from document.cookie.
+// Doing so always reports "logged out" and creates an endless login loop even
+// after the server has accepted the username and password.
 router.beforeEach((to) => {
-  // Check the session cookie
-  const sessionCookie = document.cookie.split(';').find(cookie => cookie.trim().startsWith('s-ui='))
-  const isAuthenticated = !!sessionCookie
-
-  // If the route requires authentication and the user is not authenticated, redirect to /login
-  if (to.meta.requiresAuth && !isAuthenticated) {
-    return '/login'
-  }
-  if (to.path === '/login' && isAuthenticated) {
-    // If already authenticated and visiting /login, redirect to '/'
-    return '/'
-  }
-
   // Load default data
   if (to.path !== '/login') {
     loadDataInterval()
