@@ -6,14 +6,19 @@ axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest'
 axios.defaults.baseURL = "./"
 const pendingRequests = new Map()
 
+const requestKey = (config: any) => {
+    const params = config.params ? JSON.stringify(config.params, Object.keys(config.params).sort()) : ''
+    return `${config.method}:${config.url}:${params}`
+}
+
 axios.interceptors.request.use(
     (config) => {
         // Generate a unique key for the request
-        const requestKey = `${config.method}:${config.url}`
+        const key = requestKey(config)
         
         // Check if there is already a pending request with the same key
-        if (pendingRequests.has(requestKey)) {
-            const cancelSource = pendingRequests.get(requestKey)
+        if (pendingRequests.has(key)) {
+            const cancelSource = pendingRequests.get(key)
             cancelSource.cancel('Duplicate request cancelled')
         }
         
@@ -22,7 +27,7 @@ axios.interceptors.request.use(
         config.cancelToken = cancelSource.token
         
         // Store the cancel token in the pending requests map
-        pendingRequests.set(requestKey, cancelSource)
+        pendingRequests.set(key, cancelSource)
         
         if (config.data instanceof FormData) {
             config.headers['Content-Type'] = 'multipart/form-data'
@@ -35,18 +40,14 @@ axios.interceptors.request.use(
 axios.interceptors.response.use(
     (response) => {
         // Remove the request from the pending requests map
-        const requestKey = `${response.config.method}:${response.config.url}`
-        pendingRequests.delete(requestKey)
+        pendingRequests.delete(requestKey(response.config))
         return response
     },
     (error) => {
+        if (error.config) pendingRequests.delete(requestKey(error.config))
         if (axios.isCancel(error)) {
             // Handle duplicate request cancellation here if needed
             console.warn(error.message)
-        } else {
-            // Remove the request from the pending requests map on error
-            const requestKey = `${error.config.method}:${error.config.url}`
-            pendingRequests.delete(requestKey)
         }
         return Promise.reject(error)
     }

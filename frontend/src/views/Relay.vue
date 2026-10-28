@@ -45,7 +45,31 @@
       <v-btn color="primary" variant="tonal" prepend-icon="mdi-export-variant" @click="exportModal = true">{{ $t('exportLinks.btn') }}</v-btn>
     </v-col>
     <v-col cols="auto" v-if="relays.length > 0">
+      <v-btn
+        :color="batchRunning ? 'error' : 'primary'"
+        :variant="batchRunning ? 'tonal' : 'flat'"
+        :prepend-icon="batchRunning ? 'mdi-stop-circle-outline' : 'mdi-speedometer'"
+        :disabled="batchRunning && batchStopped"
+        @click="batchRunning ? stopBatchSpeed() : startBatchSpeed()"
+      >
+        {{ $t(batchRunning ? 'relay.stopSpeed' : 'relay.speedAll') }}
+      </v-btn>
+    </v-col>
+    <v-col cols="auto" v-if="relays.length > 0">
       <v-btn color="error" variant="tonal" prepend-icon="mdi-delete-sweep" :loading="clearLoading" @click="clearConfirm = true">{{ $t('quickTemplate.clearAll') }}</v-btn>
+    </v-col>
+  </v-row>
+  <v-row v-if="batchTotal > 0" justify="center">
+    <v-col cols="12" sm="8" md="6">
+      <div class="text-caption text-center mb-1">
+        {{ batchMessage }}
+      </div>
+      <v-progress-linear
+        :model-value="batchProgress"
+        :color="batchStopped ? 'warning' : 'primary'"
+        height="8"
+        rounded
+      />
     </v-col>
   </v-row>
   <v-row v-if="relays.length === 0">
@@ -91,7 +115,9 @@
                 direct {{ speedResults[directTag].data?.DownloadMbps?.toFixed(1) }} Mbps
               </v-chip>
               <v-icon v-else-if="speedResults[r.outbound] && !speedResults[r.outbound].loading && !speedResults[r.outbound].success"
-                size="small" color="error" icon="mdi-close-circle" class="ms-1" />
+                size="small" color="error" icon="mdi-close-circle" class="ms-1">
+                <v-tooltip activator="parent" location="top" :text="speedResults[r.outbound].errorMessage || $t('relay.speedFailed')"></v-tooltip>
+              </v-icon>
             </v-col>
           </v-row>
         </v-card-text>
@@ -128,6 +154,9 @@ import RelayWizard from '@/layouts/modals/RelayWizard.vue'
 import QrCode from '@/layouts/modals/QrCode.vue'
 import ExportLinks from '@/layouts/modals/ExportLinks.vue'
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const wizardModal = ref(false)
 const exportModal = ref(false)
@@ -137,6 +166,17 @@ const clearConfirm = ref(false)
 const clearLoading = ref(false)
 const checkResults = ref<Record<string, any>>({})
 const speedResults = ref<Record<string, any>>({})
+const batchRunning = ref(false)
+const batchStopped = ref(false)
+const batchCancelled = ref(false)
+const batchDone = ref(0)
+const batchTotal = ref(0)
+const batchControllers = new Map<string, AbortController>()
+const batchProgress = computed(() => batchTotal.value > 0 ? (batchDone.value / batchTotal.value) * 100 : 0)
+const batchMessage = computed(() => {
+  if (batchRunning.value) return t('relay.speedProgress', { done: batchDone.value, total: batchTotal.value })
+  return t(batchStopped.value ? 'relay.speedStopped' : 'relay.speedFinished')
+})
 const directTag = computed(() => (Data().outbounds || []).find((o: any) => o.type === 'direct')?.tag || '')
 
 // QR for a relay = the QR of the clients on its entry inbound(s) — that's the
@@ -194,19 +234,61 @@ const checkOutbound = async (tag: string) => {
   checkResults.value = { ...checkResults.value, [tag]: { loading: false, success, data: msg.obj ?? null } }
 }
 
-const checkSpeed = async (tag: string) => {
+const checkSpeed = async (tag: string, signal?: AbortSignal) => {
   speedResults.value = { ...speedResults.value, [tag]: { loading: true, success: false } }
-  const msg = await HttpUtils.get('api/checkOutbound', { tag, speed: 1, bytes: 5 * 1024 * 1024 })
+  const msg = await HttpUtils.get('api/checkOutbound', { tag, speed: 1, bytes: 5 * 1024 * 1024 }, signal ? { signal } : {})
   const success = msg.success && msg.obj?.OK
   speedResults.value = {
     ...speedResults.value,
     [tag]: { loading: false, success, data: msg.obj ?? null, errorMessage: success ? undefined : (msg.obj?.Error ?? msg.msg ?? '') }
   }
+  checkResults.value = {
+    ...checkResults.value,
+    [tag]: { loading: false, success, data: msg.obj ?? null }
+  }
 }
 
 const compareRelay = async (tag: string) => {
   const tags = directTag.value && directTag.value !== tag ? [tag, directTag.value] : [tag]
-  await Promise.all(tags.map(checkSpeed))
+  await Promise.all(tags.map((speedTag) => checkSpeed(speedTag)))
+}
+
+const startBatchSpeed = async () => {
+  const tags = [...new Set(relays.value.map((r: any) => r.outbound))]
+  if (tags.length === 0) return
+
+  batchRunning.value = true
+  batchStopped.value = false
+  batchCancelled.value = false
+  batchDone.value = 0
+  batchTotal.value = tags.length
+  let nextIndex = 0
+
+  const worker = async () => {
+    while (!batchCancelled.value) {
+      const index = nextIndex++
+      if (index >= tags.length) return
+      const tag = tags[index]
+      const controller = new AbortController()
+      batchControllers.set(tag, controller)
+      try {
+        await checkSpeed(tag, controller.signal)
+      } finally {
+        batchControllers.delete(tag)
+        batchDone.value += 1
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(3, tags.length) }, worker))
+  batchRunning.value = false
+}
+
+const stopBatchSpeed = () => {
+  batchStopped.value = true
+  batchCancelled.value = true
+  batchControllers.forEach((controller) => controller.abort())
+  batchControllers.clear()
 }
 
 const delRelay = async (r: any, index: number) => {

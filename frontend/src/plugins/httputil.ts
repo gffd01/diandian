@@ -72,7 +72,7 @@ export function getRemoteServer(): string {
 }
 
 const HttpUtils = {
-  async get(url: string, data: object = {}, options: any[] = []): Promise<Msg> {
+  async get(url: string, data: object = {}, options: any = {}): Promise<Msg> {
     let msg: Msg
     try {
         const config: any = { params: data, ...options }

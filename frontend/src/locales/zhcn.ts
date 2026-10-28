@@ -72,6 +72,12 @@ export default {
     empty: "还没有中转。点「添加中转」创建一个。",
     delConfirm: "删除该中转(它的路由规则 + 落地出站)?",
     clearAllConfirm: "删除全部中转(路由规则 + 落地出站)?此操作不可撤销。",
+    speedAll: "全部测速",
+    stopSpeed: "停止测速",
+    speedProgress: "正在测速 {done}/{total}",
+    speedFinished: "全部测速完成",
+    speedStopped: "测速已停止",
+    speedFailed: "测速失败",
   },
   exportLinks: {
     btn: "导出",
