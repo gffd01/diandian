@@ -491,6 +491,6 @@ func (a *ApiService) GetCheckOutbound(c *gin.Context) {
 	link := c.Query("link")
 	speed := c.Query("speed") == "1"
 	maxBytes, _ := strconv.ParseInt(c.Query("bytes"), 10, 64)
-	result := a.ConfigService.CheckOutbound(tag, link, speed, maxBytes)
+	result := a.ConfigService.CheckOutbound(c.Request.Context(), tag, link, speed, maxBytes)
 	jsonObj(c, result, nil)
 }

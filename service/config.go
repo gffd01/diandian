@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"sync"
@@ -176,17 +177,23 @@ func (s *ConfigService) StopCore() error {
 	return nil
 }
 
-func (s *ConfigService) CheckOutbound(tag string, link string, speed bool, maxBytes int64) core.CheckOutboundResult {
+func (s *ConfigService) CheckOutbound(requestCtx context.Context, tag string, link string, speed bool, maxBytes int64) core.CheckOutboundResult {
 	if tag == "" {
 		return core.CheckOutboundResult{Error: "missing query parameter: tag"}
 	}
 	if corePtr == nil || !corePtr.IsRunning() {
 		return core.CheckOutboundResult{Error: "core not running"}
 	}
+	// Keep sing-box values from the core context, but stop an in-flight check
+	// when the browser cancels the request (for example, "停止测速").
+	ctx, cancel := context.WithCancel(corePtr.GetCtx())
+	defer cancel()
+	stopRequestCancel := context.AfterFunc(requestCtx, cancel)
+	defer stopRequestCancel()
 	if speed {
-		return core.CheckOutboundSpeed(corePtr.GetCtx(), tag, link, maxBytes)
+		return core.CheckOutboundSpeed(ctx, tag, link, maxBytes)
 	}
-	return core.CheckOutbound(corePtr.GetCtx(), tag, link)
+	return core.CheckOutbound(ctx, tag, link)
 }
 
 func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initUsers string, loginUser string, hostname string) ([]string, error) {

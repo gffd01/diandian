@@ -72,6 +72,12 @@ export default {
     empty: "No relays yet. Click \"Add Relay\" to create one.",
     delConfirm: "Delete this relay (its route rule and the landing outbound)?",
     clearAllConfirm: "Delete ALL relays (route rules + landing outbounds)? This cannot be undone.",
+    speedAll: "Test All",
+    stopSpeed: "Stop Test",
+    speedProgress: "Testing {done}/{total}",
+    speedFinished: "All speed tests completed",
+    speedStopped: "Speed test stopped",
+    speedFailed: "Speed test failed",
   },
   exportLinks: {
     btn: "Export",
